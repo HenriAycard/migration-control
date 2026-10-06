@@ -22,6 +22,7 @@ DEFAULTS = {
     "sandbox": {"packages": {}},
     "agents": {"model": "auto", "max_iterations": 3, "planner": True, "xlsx": True},
     "console_workspace": "default",
+    "runner": {"type": "local", "isolation": "docker"},
 }
 
 
@@ -55,6 +56,12 @@ class Module(dict):
 
     @property
     def fetch(self):
+        if self.get("_local"):
+            return "local"
+        return self.managed_fetch
+
+    @property
+    def managed_fetch(self):
         """How the code reaches the sandbox.
 
         clone   public repo: the agent clones it at run time (always fresh, also on scheduled runs)
@@ -83,8 +90,12 @@ class Config(dict):
         self.root = Path(root)
 
     @property
+    def local(self):
+        return self["runner"]["type"] == "local"
+
+    @property
     def modules(self):
-        return [Module(m) for m in self["estate"]]
+        return [Module(m, _local=True) if self.local else Module(m) for m in self["estate"]]
 
     def module(self, name):
         for m in self.modules:

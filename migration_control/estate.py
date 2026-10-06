@@ -29,7 +29,10 @@ def setup_line(m, i):
     head = f"{i}. {m.name}" + (f" — {m['description']}" if m.get("description") else "")
     if m.get("depends_on"):
         head += f" (depends on: {', '.join(m['depends_on'])})"
-    if m.fetch == "clone":
+    if m.fetch == "local":
+        ref = f" (ref {m.ref})" if "repo" in m else ""
+        body = f"   Already checked out at {workspace(m)}{ref}. Leave it as is; experiment on throwaway copies."
+    elif m.fetch == "clone":
         body = f"   git clone {m['repo']} {workspace(m)} && git -C {workspace(m)} checkout {m.ref}"
     elif m.fetch == "mount":
         body = f"   Already mounted at {workspace(m)} (ref {m.ref}). Do not push from it."
@@ -68,6 +71,41 @@ def _tar(src_dir, name, out):
         tf.add(src_dir, arcname=name, filter=keep)
 
 
+def _clone(m, dst):
+    """Clone a repo module at its ref into dst (token used for the clone only, then removed from the remote)."""
+    token = m.token()
+    url = _authed_url(m, token) if token else m["repo"]
+    if SHA_RE.match(m.ref):
+        _git(["clone", "--quiet", url, str(dst)], token=token)
+        _git(["checkout", "--quiet", m.ref], cwd=dst, token=token)
+    else:
+        _git(["clone", "--quiet", "--depth", "1", "--branch", m.ref, url, str(dst)], token=token)
+    if token:
+        _git(["remote", "set-url", "origin", m["repo"]], cwd=dst)
+    return _git(["rev-parse", "HEAD"], cwd=dst)
+
+
+def _extract_single_root(archive, tmp):
+    with tarfile.open(archive) as tf:
+        tf.extractall(tmp)  # noqa: S202 — the user's own archive
+    entries = list(Path(tmp).iterdir())
+    return entries[0] if len(entries) == 1 and entries[0].is_dir() else Path(tmp)
+
+
+def materialize(cfg, m, workspace_dir):
+    """Put module m at <workspace_dir>/<name> for a local run. Returns a short description of what was placed."""
+    dst = Path(workspace_dir) / m.name
+    if "path" in m:
+        src = (cfg.root / m["path"]).resolve()
+        if src.is_file():
+            with tempfile.TemporaryDirectory() as tmp:
+                shutil.copytree(_extract_single_root(src, tmp), dst, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+        else:
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+        return f"copied from {m['path']}"
+    return f"cloned at {_clone(m, dst)[:12]}"
+
+
 def snapshot(cfg, m, out_dir):
     """Build <out_dir>/<name>.tar.gz for an `upload` module. Returns (path, fingerprint)."""
     out_dir = Path(out_dir)
@@ -79,11 +117,7 @@ def snapshot(cfg, m, out_dir):
             # re-pack so the code always lands in /workspace/<module name>, whatever the archive's top folder
             fp = hashlib.sha256(src.read_bytes()).hexdigest()[:16]
             with tempfile.TemporaryDirectory() as tmp:
-                with tarfile.open(src) as tf:
-                    tf.extractall(tmp)  # noqa: S202 — the user's own archive
-                entries = [p for p in Path(tmp).iterdir()]
-                root = entries[0] if len(entries) == 1 and entries[0].is_dir() else Path(tmp)
-                _tar(root, m.name, out)
+                _tar(_extract_single_root(src, tmp), m.name, out)
             return out, fp
         _tar(src, m.name, out)
         h = hashlib.sha256()
@@ -91,16 +125,9 @@ def snapshot(cfg, m, out_dir):
             if p.is_file() and not any(part in SKIP_DIRS for part in p.relative_to(src).parts):
                 h.update(str(p.relative_to(src)).encode()); h.update(str(p.stat().st_mtime_ns).encode())
         return out, h.hexdigest()[:16]
-    token = m.token()
     with tempfile.TemporaryDirectory() as tmp:
         dst = Path(tmp) / m.name
-        if SHA_RE.match(m.ref):
-            _git(["clone", "--quiet", _authed_url(m, token), str(dst)], token=token)
-            _git(["checkout", "--quiet", m.ref], cwd=dst, token=token)
-        else:
-            _git(["clone", "--quiet", "--depth", "1", "--branch", m.ref, _authed_url(m, token), str(dst)], token=token)
-        _git(["remote", "set-url", "origin", m["repo"]], cwd=dst)      # no token inside the archive
-        head = _git(["rev-parse", "HEAD"], cwd=dst)
+        head = _clone(m, dst)
         _tar(dst, m.name, out)
     return out, head[:16]
 

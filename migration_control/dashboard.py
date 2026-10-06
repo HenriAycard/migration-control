@@ -13,7 +13,7 @@ import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from . import RESOURCES, render, runs
+from . import RESOURCES, local, render, runs
 
 TEMPLATE = RESOURCES / "dashboard" / "template.html"
 
@@ -181,6 +181,8 @@ def schedule_label(cfg, dep):
     s = cfg.get("schedule")
     if not s:
         return "manual runs only"
+    if cfg.local:
+        return f"cron {s['cron']} · " + ("crontab" if local.schedule_installed(cfg) else "not installed")
     return f"cron {s['cron']} · {s['timezone']}" + ("" if dep.get("id") else " (not deployed)")
 
 
@@ -275,7 +277,7 @@ def cache_agents(client, st):
 
 
 def build(cfg, st, client=None, log=print):
-    if client is not None:
+    if client is not None and not cfg.local:
         log("fetching finished runs…")
         runs.refresh(client, st, cfg, log)
         cache_agents(client, st)
@@ -305,6 +307,8 @@ def serve(cfg, st, client, port=8765, log=print):
             ts, val = cache["live"]
             if val is not None and now - ts < 5:
                 return val
+        if cfg.local:
+            return {"now": now, "running": local.running_runs(st), "deployment": None}
         dep = None
         if st.get("deployment", "id"):
             d = client.get(f"/deployments/{st.get('deployment', 'id')}", params={"beta": "true"})

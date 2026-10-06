@@ -4,69 +4,230 @@
   "description": "Describes one estate (a set of repositories migrated together) for migration-control.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "project", "estate"],
+  "required": [
+    "version",
+    "project",
+    "estate"
+  ],
   "$defs": {
-    "slug": {"type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 48}
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "maxLength": 48
+    }
   },
   "properties": {
-    "version": {"const": 1},
-    "project": {"$ref": "#/$defs/slug", "description": "Short name, used to name the agents, environment and memory store in your Anthropic workspace."},
+    "version": {
+      "const": 1
+    },
+    "project": {
+      "$ref": "#/$defs/slug",
+      "description": "Short name, used to name the agents, environment and memory store in your Anthropic workspace."
+    },
     "estate": {
-      "type": "array", "minItems": 1, "maxItems": 20,
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
       "description": "Every module of the estate. They are analysed together, never in isolation.",
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["name"],
-        "oneOf": [{"required": ["repo"]}, {"required": ["path"]}],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "repo"
+            ]
+          },
+          {
+            "required": [
+              "path"
+            ]
+          }
+        ],
         "properties": {
-          "name": {"$ref": "#/$defs/slug", "description": "Module id used in every report (e.g. billing-api)."},
-          "description": {"type": "string", "maxLength": 300, "description": "One line: what this module is (helps the agent and the dashboard)."},
-          "repo": {"type": "string", "pattern": "^https://(github\\.com|gitlab\\.com|[A-Za-z0-9.-]+)/.+", "description": "HTTPS clone URL of a GitHub or GitLab repository."},
-          "provider": {"enum": ["github", "gitlab"], "description": "Defaults from the repo host; required for self-hosted GitLab."},
-          "ref": {"type": "string", "default": "main", "description": "Branch, tag or commit SHA treated as 'what runs in production'."},
-          "token_env": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "description": "Name of the environment variable holding a read token. Omit for public repositories."},
-          "path": {"type": "string", "description": "Local directory or .tar.gz, uploaded as a snapshot."},
-          "depends_on": {"type": "array", "items": {"$ref": "#/$defs/slug"}, "description": "Modules this one calls or runs on (REST client, database, runtime host...)."},
-          "icon": {"type": "string", "maxLength": 4}
+          "name": {
+            "$ref": "#/$defs/slug",
+            "description": "Module id used in every report (e.g. billing-api)."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "One line: what this module is (helps the agent and the dashboard)."
+          },
+          "repo": {
+            "type": "string",
+            "pattern": "^https://(github\\.com|gitlab\\.com|[A-Za-z0-9.-]+)/.+",
+            "description": "HTTPS clone URL of a GitHub or GitLab repository."
+          },
+          "provider": {
+            "enum": [
+              "github",
+              "gitlab"
+            ],
+            "description": "Defaults from the repo host; required for self-hosted GitLab."
+          },
+          "ref": {
+            "type": "string",
+            "default": "main",
+            "description": "Branch, tag or commit SHA treated as 'what runs in production'."
+          },
+          "token_env": {
+            "type": "string",
+            "pattern": "^[A-Z_][A-Z0-9_]*$",
+            "description": "Name of the environment variable holding a read token. Omit for public repositories."
+          },
+          "path": {
+            "type": "string",
+            "description": "Local directory or .tar.gz, uploaded as a snapshot."
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/slug"
+            },
+            "description": "Modules this one calls or runs on (REST client, database, runtime host...)."
+          },
+          "icon": {
+            "type": "string",
+            "maxLength": 4
+          }
         }
       }
     },
     "policy": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "target": {"type": "string", "default": "latest official stable version and latest security patch for every component", "description": "Free text: what 'up to date' means for this estate."},
-        "rules": {"type": "array", "items": {"type": "string"}, "description": "Extra house rules, appended to the agents' instructions."},
-        "approvers": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/slug"}, "default": ["tech-lead", "security", "platform-ops"]},
-        "include_toolchain": {"type": "boolean", "default": true, "description": "Also report build/test toolchain components (scoped separately)."}
+        "target": {
+          "type": "string",
+          "default": "latest official stable version and latest security patch for every component",
+          "description": "Free text: what 'up to date' means for this estate."
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra house rules, appended to the agents' instructions."
+        },
+        "approvers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/slug"
+          },
+          "default": [
+            "tech-lead",
+            "security",
+            "platform-ops"
+          ]
+        },
+        "include_toolchain": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also report build/test toolchain components (scoped separately)."
+        }
       }
     },
     "sandbox": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "packages": {
-          "type": "object", "additionalProperties": false,
+          "type": "object",
+          "additionalProperties": false,
           "description": "Packages pre-installed in the cloud sandbox (cached across runs), e.g. {apt: [openjdk-17-jdk, maven]}.",
-          "patternProperties": {"^(apt|cargo|gem|go|npm|pip)$": {"type": "array", "items": {"type": "string"}}}
+          "patternProperties": {
+            "^(apt|cargo|gem|go|npm|pip)$": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
     "agents": {
-      "type": "object", "additionalProperties": false,
+      "type": "object",
+      "additionalProperties": false,
       "properties": {
-        "model": {"type": "string", "default": "auto", "description": "'auto' picks the newest Opus-class model, or give an exact model id."},
-        "max_iterations": {"type": "integer", "minimum": 1, "maximum": 20, "default": 3},
-        "budget_usd": {"type": "number", "exclusiveMinimum": 0, "description": "Optional spend cap per run (list price)."},
-        "planner": {"type": "boolean", "default": true},
-        "xlsx": {"type": "boolean", "default": true, "description": "Also produce impact-report.xlsx for auditors."}
+        "model": {
+          "type": "string",
+          "default": "auto",
+          "description": "'auto' picks the newest Opus-class model, or give an exact model id."
+        },
+        "max_iterations": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 3
+        },
+        "budget_usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Optional spend cap per run (list price)."
+        },
+        "planner": {
+          "type": "boolean",
+          "default": true
+        },
+        "xlsx": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also produce impact-report.xlsx for auditors."
+        }
       }
     },
     "schedule": {
-      "type": "object", "additionalProperties": false, "required": ["cron", "timezone"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cron",
+        "timezone"
+      ],
       "properties": {
-        "cron": {"type": "string"},
-        "timezone": {"type": "string"}
+        "cron": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        }
       }
     },
-    "console_workspace": {"type": "string", "default": "default"}
+    "console_workspace": {
+      "type": "string",
+      "default": "default"
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the agents run.",
+      "properties": {
+        "type": {
+          "enum": [
+            "local",
+            "managed"
+          ],
+          "default": "local",
+          "description": "local: Claude Code headless on this machine (your Claude subscription or API key). managed: Claude Managed Agents API (cloud sandbox, needs API credit)."
+        },
+        "isolation": {
+          "enum": [
+            "docker",
+            "none"
+          ],
+          "default": "docker",
+          "description": "local only. docker: one container per run (recommended \u2014 the agent runs builds and shell commands). none: directly on this machine."
+        },
+        "image": {
+          "type": "string",
+          "description": "local+docker only: base image (default node:22-bookworm). sandbox.packages are installed on top."
+        }
+      }
+    }
   }
 }

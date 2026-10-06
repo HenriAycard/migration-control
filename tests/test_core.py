@@ -22,7 +22,7 @@ def base(**over):
         {"name": "api", "repo": "https://github.com/acme/api.git", "token_env": "GH_TOKEN", "depends_on": ["db"]},
         {"name": "web", "repo": "https://gitlab.com/acme/web", "token_env": "GL_TOKEN", "depends_on": ["api"]},
         {"name": "db", "repo": "https://github.com/acme/db"},
-    ]}
+    ], "runner": {"type": "managed"}}
     d.update(over)
     return d
 
@@ -30,6 +30,8 @@ def base(**over):
 def test_fetch_modes(tmp_path):
     cfg = write_cfg(tmp_path, base())
     assert [m.fetch for m in cfg.modules] == ["mount", "upload", "clone"]
+    d = base(); d.pop("runner")
+    assert [m.fetch for m in write_cfg(tmp_path, d).modules] == ["local"] * 3   # local runner is the default
     assert [m.provider for m in cfg.modules] == ["github", "gitlab", "github"]
 
 

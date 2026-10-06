@@ -2,6 +2,7 @@
 
 Scope (decided): open-source, GitHub + GitLab with tokens, single-user local dashboard,
 versions + CVEs + upgrades. Engine = the `mig` CLI; entry point = a Claude Code skill.
+Runners: `local` (Claude Code headless, Docker or host — default) and `managed` (Claude Managed Agents API).
 
 ## v0 — anyone can scan their estate and steer it from the dashboard ✅ (this release)
 - `migration.yaml` + schema; module fetch modes clone / mount / upload (GitHub & GitLab).
@@ -11,7 +12,15 @@ versions + CVEs + upgrades. Engine = the `mig` CLI; entry point = a Claude Code 
 - Data-driven dashboard (any number of modules), empty state, live feed via `mig dashboard --serve`.
 - Petclinic example with recorded real runs (`mig init --example petclinic` → `mig dashboard --offline`).
 
-### Verified against the live API (2026-10-06)
+## v0.2 — local runner ✅
+- `runner: {type: local, isolation: docker|none}`: Claude Code headless (`claude -p --output-format stream-json`), modules checked
+  out locally, same prompts/rubrics/schemas; local grader loop (`--json-schema` verdict, failed criteria fed back via `--resume`);
+  `.mig/memory/`; background runs + `mig stop`; live feed; `mig schedule install|remove` (cron).
+- Verified with a fake `claude` (tests/test_local.py + CLI walk-through). Not yet: a real scan in Docker (needs `claude setup-token`)
+  or on the host.
+- Known gaps: cron uses the machine's timezone; on Linux the container runs as the host uid (no passwd entry) — untested.
+
+### Managed runner — verified against the live API (2026-10-06)
 - `mig doctor`; `mig up` steps model pick → environment create → `POST /v1/skills` multipart upload (`display_title`, `files[]`) → memory store create.
 
 ### Not verified yet

@@ -1,6 +1,6 @@
 # migration-control
 
-**Whole-estate version, CVE and upgrade migrations, run by Claude Managed Agents — steered from a local dashboard.**
+**Whole-estate version, CVE and upgrade migrations, run by Claude — on your machine with Claude Code, or on Claude Managed Agents — steered from a local dashboard.**
 
 Point it at the repositories you migrate together (GitHub or GitLab, public or private). A scanner agent
 inventories every component of every module, finds the latest official versions, security patches and CVEs,
@@ -23,22 +23,36 @@ mig init --example petclinic
 mig dashboard --offline        # replays real recorded runs: 3 scans, a 7-wave plan, a gated PR
 ```
 
+## Where the agents run
+
+| `runner` | How | Auth | Code leaves your machine? |
+|---|---|---|---|
+| **`local` + `docker`** (default) | Claude Code headless, one container per run | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, Claude subscription) or `ANTHROPIC_API_KEY` | no (only model traffic) |
+| `local` + `none` | Claude Code headless directly on this machine — no isolation, the agent runs builds without prompts | your normal Claude Code login | no |
+| `managed` | Claude Managed Agents API: cloud sandbox, Outcome grader, memory store, scheduled deployment, sessions in the Console | `ANTHROPIC_API_KEY` with API credit | yes (cloned / mounted / uploaded into the sandbox) |
+
+The prompts, rubrics, report schemas and dashboard are identical in all three. Locally, `mig` reproduces the
+managed pieces: an independent grader pass after each attempt (up to `max_iterations`, failed criteria fed back to
+the agent), `.mig/memory/` as the memory store, and `mig schedule install` (cron) instead of a deployment.
+Works the same on a VPS: install Docker + Claude Code, `claude setup-token`, put the token in `.env`.
+
 ## Run it on your estate
 
 ```bash
 mkdir my-estate && cd my-estate      # a small "control" repo, separate from your app repos
 mig init                             # asks for your repos → writes migration.yaml
-export ANTHROPIC_API_KEY=...         # or put it in .env (gitignored by `mig init`)
+claude setup-token                   # local runner in Docker: put CLAUDE_CODE_OAUTH_TOKEN=... in .env (gitignored)
 export GITHUB_TOKEN=... GITLAB_TOKEN=...   # only for private repos (read access is enough)
 mig doctor                           # key, API, tokens, repo access
-mig up                               # creates environment, skill, memory store, agents, deployment
+mig up                               # local: builds the sandbox image · managed: environment, skill, memory store, agents, deployment
 mig scan                             # start a scan now
 mig dashboard --serve                # http://127.0.0.1:8765 — follow it live
 mig plan                             # once the scan is graded: build the migration plan
 ```
 
-`mig up` is idempotent: change `migration.yaml` and run it again — agents get a new version, the
-deployment gets the new kickoff. Everything created is recorded in `.mig/state.json`.
+`mig up` is idempotent: change `migration.yaml` and run it again. With the managed runner, agents get a new
+version and the deployment gets the new kickoff. Everything created is recorded in `.mig/state.json`.
+Local runs start in the background (`mig stop <run>` to stop one); add `--foreground` for cron / CI.
 
 ## migration.yaml
 
@@ -75,7 +89,12 @@ schedule:                             # optional — omit for manual runs only
 Full reference: [`migration-config.schema.json`](migration_control/resources/schemas/migration-config.schema.json).
 `mig validate` renders every prompt, rubric and agent into `.mig/rendered/` so you can read exactly what the agents get.
 
-## How your code reaches the sandbox
+## How your code reaches the agent
+
+**Local runner:** `mig` checks every module out into `.mig/work/<run>/workspace/` (clone with your token, or copy the
+local path), mounts it at `/workspace` and deletes it after the run. Tokens never leave your machine.
+
+**Managed runner:**
 
 | Module | Mode | Fresh on scheduled runs? | Where the token goes |
 |---|---|---|---|
@@ -101,7 +120,8 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 | `mig doctor` | key, API, tokens, repository access |
 | `mig up` | create / update everything in your Anthropic workspace |
 | `mig scan [--wait]` · `mig plan [--scan ID] [--wait]` | start runs |
-| `mig run-now` · `mig schedule pause\|unpause` | drive the scheduled deployment |
+| `mig stop <run>` | stop a local run |
+| `mig schedule install\|remove` (local) · `mig run-now` · `mig schedule pause\|unpause` (managed) | scheduling |
 | `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
 | `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
 
@@ -109,8 +129,9 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 
 - Agents **report and plan only** — they never push, open PRs or touch your repositories (PR/MR creation is v1 and will be human-approved per write).
 - Every version, CVE and end-of-life claim needs an official source or is tagged `UNVERIFIED` (the bundled `regulated-sourcing` skill).
-- Your API key and tokens are never written by `mig` — not to `.mig/`, not into prompts, not into the dashboard page. The dashboard server listens on `127.0.0.1` only.
-- Scans cost real money: a full scan of a mid-size estate is typically a few dollars, heavy estates more. `mig status` shows the list cost of the last runs; set `agents.budget_usd` to cap a run.
+- Your API key and tokens are never written by `mig` — not to `.mig/`, not into prompts, not into the dashboard page, not on a `docker run` command line. The dashboard server listens on `127.0.0.1` only.
+- Local runs use `bypassPermissions`: keep `isolation: docker` unless you accept the agent running builds and shell commands directly on your machine.
+- Scans are not free: on the API a full scan of a mid-size estate is a few dollars, heavy estates more; on a Claude subscription a heavy scan uses a large share of your usage window. `mig status` shows the cost of the last runs; `agents.budget_usd` caps a run (API billing).
 
 ## Roadmap
 

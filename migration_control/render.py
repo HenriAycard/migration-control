@@ -47,7 +47,8 @@ def scanner_agent(cfg, model, skill_id):
     xlsx = cfg["agents"]["xlsx"]
     system = _tpl("scanner-system.md",
                   agent_name=f"{cfg['project']}-scanner", project=cfg["project"], target=cfg["policy"]["target"],
-                  xlsx_skill_line=" Use the xlsx skill to produce the Excel workbook." if xlsx else "",
+                  xlsx_skill_line=(" Produce the Excel workbook with openpyxl (`pip install openpyxl`)." if cfg.local else
+                                   " Use the xlsx skill to produce the Excel workbook.") if xlsx else "",
                   xlsx_output=" and /mnt/session/outputs/impact-report.xlsx (for security and auditors)" if xlsx else "",
                   extra_rules=_rules(cfg))
     skills = [{"type": "custom", "skill_id": skill_id, "version": "latest"}]
@@ -64,7 +65,7 @@ def scanner_task(cfg):
     xlsx = cfg["agents"]["xlsx"]
     return _tpl("scanner-task.md",
                 module_count=len(mods), module_setup=setup_text(mods),
-                xlsx_deliverable=("\n- impact-report.xlsx — Excel workbook for security and auditors (use the xlsx skill), sheets in this order: "
+                xlsx_deliverable=(f"\n- impact-report.xlsx — Excel workbook for security and auditors ({'openpyxl' if cfg.local else 'use the xlsx skill'}), sheets in this order: "
                                   "Summary (verdict + severity counts), Alerts, Inventory (module, component_key, current, latest, latest security patch, "
                                   "EOL, source), CVEs (component_key, CVE ID, CVSS, severity, fixed in, link, verified). Header row frozen, autofilter on, "
                                   "same data as impact-report.json.") if xlsx else "",
