@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "migration-plan.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_date",
+    "source_scan",
+    "waves",
+    "coverage",
+    "blocking_decisions",
+    "proof"
+  ],
+  "$defs": {
+    "component_key": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check",
+        "how",
+        "pass_criterion"
+      ],
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "how": {
+          "type": "string",
+          "description": "Exact command or procedure"
+        },
+        "pass_criterion": {
+          "type": "string",
+          "description": "Measurable threshold"
+        }
+      }
+    },
+    "module": {
+      "type": "string",
+      "description": "Module name from migration.yaml (enum injected at render time)."
+    },
+    "approver": {
+      "type": "string",
+      "description": "Approver role from migration.yaml policy.approvers (enum injected at render time)."
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "plan_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "source_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scan_date",
+        "report_schema_version"
+      ],
+      "properties": {
+        "scan_date": {
+          "type": "string"
+        },
+        "report_schema_version": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        }
+      }
+    },
+    "waves": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "wave",
+          "title",
+          "component_keys",
+          "modules",
+          "depends_on",
+          "targets",
+          "intermediate_steps",
+          "changes",
+          "entry_gates",
+          "exit_gates",
+          "rollback",
+          "approvers",
+          "risk",
+          "effort",
+          "evidence",
+          "status"
+        ],
+        "properties": {
+          "wave": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "title": {
+            "type": "string"
+          },
+          "component_keys": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/component_key"
+            }
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/module"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "component_key",
+                "from",
+                "to"
+              ],
+              "properties": {
+                "component_key": {
+                  "$ref": "#/$defs/component_key"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "intermediate_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "description",
+                "file",
+                "line",
+                "impact_ref"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                },
+                "impact_ref": {
+                  "type": "string",
+                  "description": "impacts[].id from the source report, or NEW if found during planning"
+                }
+              }
+            }
+          },
+          "entry_gates": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/gate"
+            }
+          },
+          "exit_gates": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/gate"
+            }
+          },
+          "rollback": {
+            "type": "string"
+          },
+          "approvers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/$defs/approver"
+            }
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "effort": {
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Build ids from the source report and/or proof ids from this run; empty = UNPROVEN"
+          },
+          "status": {
+            "enum": [
+              "PROVEN",
+              "PARTIALLY_PROVEN",
+              "UNPROVEN",
+              "NOT_PROVABLE_IN_SANDBOX"
+            ]
+          }
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outdated_production_component_keys",
+        "uncovered",
+        "deferred"
+      ],
+      "properties": {
+        "outdated_production_component_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component_key"
+          }
+        },
+        "uncovered": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component_key"
+          },
+          "description": "Must be empty"
+        },
+        "deferred": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "component_key",
+              "reason"
+            ],
+            "properties": {
+              "component_key": {
+                "$ref": "#/$defs/component_key"
+              },
+              "reason": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "blocking_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "decision",
+          "owner",
+          "blocks_waves",
+          "recommendation"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "blocks_waves": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "recommendation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "wave",
+        "patch_file",
+        "base_refs",
+        "steps"
+      ],
+      "properties": {
+        "wave": {
+          "type": "integer"
+        },
+        "patch_file": {
+          "type": "string"
+        },
+        "base_refs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "command",
+              "result",
+              "output_excerpt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "command": {
+                "type": "string"
+              },
+              "result": {
+                "enum": [
+                  "PASS",
+                  "FAIL"
+                ]
+              },
+              "output_excerpt": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

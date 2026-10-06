@@ -1,0 +1,34 @@
+{
+  "scanner": {
+    "id": "agent_example0001",
+    "name": "migration-impact-scanner",
+    "version": 2,
+    "skills": [
+      {
+        "type": "custom",
+        "id": "skill_example0001",
+        "version": "latest",
+        "name": "regulated-sourcing"
+      },
+      {
+        "type": "anthropic",
+        "id": "xlsx",
+        "version": "latest",
+        "name": "xlsx"
+      }
+    ]
+  },
+  "planner": {
+    "id": "agent_example0002",
+    "name": "migration-planner",
+    "version": 2,
+    "skills": [
+      {
+        "type": "custom",
+        "id": "skill_example0001",
+        "version": "latest",
+        "name": "regulated-sourcing"
+      }
+    ]
+  }
+}

@@ -1,0 +1,509 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "impact-report.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scan_date",
+    "baseline",
+    "previous_scan_date",
+    "verdict",
+    "new_since_last_scan",
+    "alerts",
+    "components",
+    "impacts",
+    "builds",
+    "cross_module",
+    "migration_order",
+    "decisions_needed",
+    "counts"
+  ],
+  "$defs": {
+    "component_key": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Stable product identifier WITHOUT version, kebab-case, identical across scans. Examples: spring-boot, jackson-databind, jdk, python, angular, nodejs, postgresql, oracle-database."
+    },
+    "severity": {
+      "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "UNSCORED"
+      ]
+    },
+    "sev_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "unscored",
+        "total"
+      ],
+      "properties": {
+        "critical": {
+          "type": "integer"
+        },
+        "high": {
+          "type": "integer"
+        },
+        "medium": {
+          "type": "integer"
+        },
+        "low": {
+          "type": "integer"
+        },
+        "unscored": {
+          "type": "integer"
+        },
+        "total": {
+          "type": "integer"
+        }
+      }
+    },
+    "module": {
+      "type": "string",
+      "description": "Module name from migration.yaml (enum injected at render time)."
+    }
+  },
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "scan_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "baseline": {
+      "type": "boolean"
+    },
+    "previous_scan_date": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "description": "One line: how far the estate is from latest version / latest patch / no CVEs."
+    },
+    "new_since_last_scan": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "component_key",
+          "title",
+          "detail"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "new_cve",
+              "new_release",
+              "new_security_patch",
+              "resolved",
+              "new_finding",
+              "newly_tracked",
+              "correction",
+              "baseline"
+            ]
+          },
+          "module": {
+            "$ref": "#/$defs/module"
+          },
+          "component_key": {
+            "$ref": "#/$defs/component_key"
+          },
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "alerts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "severity",
+          "component_key",
+          "component",
+          "message",
+          "fix",
+          "sources"
+        ],
+        "description": "One alert per component_key (never group several products into one alert).",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/$defs/severity"
+          },
+          "component_key": {
+            "$ref": "#/$defs/component_key"
+          },
+          "component": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "fix": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module",
+          "scope",
+          "component_key",
+          "name",
+          "current",
+          "latest",
+          "latest_security_patch",
+          "outdated",
+          "eol",
+          "sources",
+          "cves"
+        ],
+        "properties": {
+          "module": {
+            "$ref": "#/$defs/module"
+          },
+          "scope": {
+            "enum": [
+              "production",
+              "test",
+              "build_toolchain"
+            ]
+          },
+          "component_key": {
+            "$ref": "#/$defs/component_key"
+          },
+          "name": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "latest": {
+            "type": "string"
+          },
+          "latest_security_patch": {
+            "type": "string"
+          },
+          "outdated": {
+            "type": "boolean"
+          },
+          "eol": {
+            "type": "boolean"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cves": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "cvss",
+                "severity",
+                "fixed_in",
+                "url",
+                "verified"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "cvss": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "severity": {
+                  "$ref": "#/$defs/severity"
+                },
+                "fixed_in": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "verified": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "impacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "module",
+          "component_key",
+          "upgrade",
+          "target",
+          "intermediate_steps",
+          "breaking_changes"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "module": {
+            "$ref": "#/$defs/module"
+          },
+          "component_key": {
+            "$ref": "#/$defs/component_key"
+          },
+          "upgrade": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "intermediate_steps": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "breaking_changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "description",
+                "file",
+                "line",
+                "source"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string"
+                },
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                },
+                "source": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "builds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "module",
+          "what",
+          "toolchain",
+          "result",
+          "errors",
+          "impact_ids"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "module": {
+            "$ref": "#/$defs/module"
+          },
+          "what": {
+            "type": "string"
+          },
+          "toolchain": {
+            "type": "string"
+          },
+          "result": {
+            "enum": [
+              "PASS",
+              "PARTIAL",
+              "FAIL",
+              "NOT_ATTEMPTED"
+            ]
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "impact_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "log": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "cross_module": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "from",
+          "to",
+          "constraint"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "constraint": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "migration_order": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "step",
+          "action",
+          "component_keys",
+          "depends_on"
+        ],
+        "properties": {
+          "step": {
+            "type": "integer"
+          },
+          "action": {
+            "type": "string"
+          },
+          "component_keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/component_key"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "decisions_needed": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "components_production",
+        "components_test",
+        "components_build_toolchain",
+        "outdated",
+        "eol",
+        "cves_production",
+        "cves_build_toolchain",
+        "builds_attempted",
+        "builds_passed"
+      ],
+      "properties": {
+        "components_production": {
+          "type": "integer"
+        },
+        "components_test": {
+          "type": "integer"
+        },
+        "components_build_toolchain": {
+          "type": "integer"
+        },
+        "outdated": {
+          "type": "integer"
+        },
+        "eol": {
+          "type": "integer"
+        },
+        "cves_production": {
+          "$ref": "#/$defs/sev_counts"
+        },
+        "cves_build_toolchain": {
+          "$ref": "#/$defs/sev_counts"
+        },
+        "builds_attempted": {
+          "type": "integer"
+        },
+        "builds_passed": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

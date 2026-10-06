@@ -1,0 +1,67 @@
+Wave 2 - ops health-check runtime: CPython 3.6.8 -> 3.14.7, requests/urllib3/PyYAML/Jinja2 latest, cx_Oracle -> python-oracledb (Thin)
+Impact ref: IMP-INFRA-PY (source report scan 2026-09-24, session sesn_example0001)
+Base: petclinic-infra.tar.gz sha256 1832fad909c689004d12c865bb59009d57fc43faf3bf18460b24f4bdf94c48c5 (not a git repo; paths are relative to petclinic-infra/)
+Apply (inside petclinic-infra/):      git apply --check wave-2.patch && git apply wave-2.patch
+Apply (from the parent directory):    git apply --directory=petclinic-infra --check wave-2.patch
+Rollback:                             git apply -R wave-2.patch
+Proof: migration-plan.md section "Proof", evidence/P01..P15
+
+diff --git a/ops/healthcheck.py b/ops/healthcheck.py
+index 7c1c553..6c215a7 100644
+--- a/ops/healthcheck.py
++++ b/ops/healthcheck.py
+@@ -4,10 +4,10 @@
+ Hits petclinic-rest's REST API, compares counts with the Oracle schema,
+ renders a small HTML summary.
+ """
+-import collections
++import collections.abc
+ import sys
+ 
+-import cx_Oracle
++import oracledb
+ import requests
+ import yaml
+ from jinja2 import Template
+@@ -17,8 +17,8 @@ CONFIG_PATH = "ops/healthcheck.yaml"
+ 
+ def load_config(path=CONFIG_PATH):
+     with open(path) as f:
+-        cfg = yaml.load(f)  # config is trusted, written by ops
+-    if not isinstance(cfg, collections.Mapping):
++        cfg = yaml.safe_load(f)  # config is trusted, written by ops; safe_load anyway (CVE-2017-18342/CVE-2020-14343)
++    if not isinstance(cfg, collections.abc.Mapping):
+         raise ValueError("config must be a mapping")
+     return cfg
+ 
+@@ -31,7 +31,7 @@ def api_counts(base_url):
+ 
+ 
+ def db_counts(dsn, user, password):
+-    conn = cx_Oracle.connect(user, password, dsn)
++    conn = oracledb.connect(user=user, password=password, dsn=dsn)  # python-oracledb Thin mode, no Oracle Client
+     cur = conn.cursor()
+     out = {}
+     for table in ("OWNERS", "VETS"):
+diff --git a/ops/requirements.txt b/ops/requirements.txt
+index 1531502..75611dd 100644
+--- a/ops/requirements.txt
++++ b/ops/requirements.txt
+@@ -1,5 +1,5 @@
+-requests==2.19.1
+-urllib3==1.23
+-PyYAML==3.12
+-cx_Oracle==6.4.1
+-Jinja2==2.10
++requests==2.34.2
++urllib3==2.8.0
++PyYAML==6.0.3
++oracledb==26.0.1
++Jinja2==3.1.6
+diff --git a/ops/runtime.txt b/ops/runtime.txt
+index 9fbd3bf..6a0819a 100644
+--- a/ops/runtime.txt
++++ b/ops/runtime.txt
+@@ -1 +1 @@
+-python-3.6.8
++python-3.14.7

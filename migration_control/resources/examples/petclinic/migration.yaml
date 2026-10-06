@@ -1,0 +1,44 @@
+# Example estate: Spring PetClinic, pinned to old releases on purpose (Java 8, Spring Boot 1.5,
+# Angular 6, Python 3.6, an unpatched Oracle Database inventory) so there is plenty to migrate.
+# `mig init --example petclinic` copies this file + recorded real runs: `mig dashboard --offline`
+# shows the whole pipeline without an API key.
+version: 1
+project: petclinic
+
+estate:
+  - name: petclinic-rest
+    description: Java backend (Spring Boot), REST API used by the front-end, Oracle JDBC profile
+    repo: https://github.com/spring-petclinic/spring-petclinic-rest.git
+    ref: v1.5.2
+    depends_on: [petclinic-infra]
+    icon: "☕"
+  - name: petclinic-angular
+    description: Angular front-end, calls petclinic-rest's REST API
+    repo: https://github.com/spring-petclinic/spring-petclinic-angular.git
+    ref: 22935fc04933e4dec3b20bcfb8720f56b09f170d
+    depends_on: [petclinic-rest]
+    icon: "🅰️"
+  - name: petclinic-infra
+    description: Python ops health check + Oracle Database inventory + Oracle Maven profile
+    path: petclinic-infra.tar.gz
+    icon: "🛢️"
+
+policy:
+  target: latest official stable version and latest security patch for every component
+  approvers: [tech-lead, security, dba, platform-ops]
+  rules:
+    - Raise an explicit ALERT if the Oracle Database Release Update is behind the latest Critical Patch Update.
+
+sandbox:
+  packages:
+    apt: [openjdk-17-jdk, maven]
+
+agents:
+  model: auto
+  max_iterations: 3
+  planner: true
+  xlsx: true
+
+schedule:
+  cron: "0 6 * * 6"
+  timezone: Europe/Paris

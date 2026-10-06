@@ -1,0 +1,12 @@
+{
+  "id": "sesn_example0005",
+  "created_at": "2026-09-26T07:58:11.083848Z",
+  "active_seconds": 516.25,
+  "verdicts": [
+    "satisfied"
+  ],
+  "explanation": "An independent grader found all criteria met:\n\n- Wave 2 pull request (verified, exact change, open not merged, approver-ready body, traceable report) (met): I checked each rubric item against the actual outputs and GitHub. (1) Verified before pushing: gate-logs/00 shows `git apply --check` exit 0 on a clean main (1a2b3c4) checkout. The provable gates were re-run and their real output is in the logs: W2-G1 install, W2-G2..G5 at 21/21, W2-G6 with DPY-6005, W2-G7 pip-audit showing 'No known vulnerabilities found' plus a negative control, W2-G8 with api_counts {'owners': 10, 'vets': 6}, and patch integrity. The report quotes this output. W2-G9, which the plan marks NOT PROVABLE IN SANDBOX, is listed as 'TO BE RUN AT ROLLOUT (not run)' and is not claimed as passed. (2) Exact change: the only branches on GitHub are main (still 1a2b3c4) and migration/wave-2-python-3.14 (9f8e7d6, a single commit whose parent is 1a2b3c4). `git diff main origin/branch` matches wave.patch exactly except the patch's prose preamble. The PR has 3 files, +11/\u221211, and gate_tests.py was not committed. (3) PR #1 is open with merged:false, head is the wave branch, base is main, and it is the only PR. (4) The PR body has: why and from\u2192to table; the 24 CVEs listed by ID; a file:line change table; a gate results table with quoted evidence; the rollback procedure; one unchecked box each for platform-ops, security and tech-lead, which matches the plan's approvers; and the line 'Do not merge until every approver has signed off' at both top and bottom. (5) pr-report.md gives the PR URL and number (#1), the branch, commit SHA 9f8e7d6c5b4a\u2026, the 3 files pushed and a gate results table, and all of it matches GitHub. One cosmetic flaw: the PR title shows '-&gt;' because of HTML escaping. The report discloses this and the reviewer declined the fix. It does not break any criterion.",
+  "console": "",
+  "wave": 2,
+  "pr_url": "https://example.invalid/example-org/petclinic-infra/pull/1"
+}

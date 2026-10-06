@@ -1,0 +1,1815 @@
+{
+  "schema_version": "1.0",
+  "plan_date": "2026-09-24",
+  "source_scan": {
+    "scan_date": "2026-09-24",
+    "report_schema_version": "1.0",
+    "session_id": "sesn_example0001"
+  },
+  "waves": [
+    {
+      "wave": 1,
+      "title": "Oracle Database 19c security patching on petclinic-db01 (RU 19.32 + OJVM 19.32 + Aug/Sep 2026 CSPU)",
+      "component_keys": [
+        "oracle-database",
+        "oracle-ojvm"
+      ],
+      "modules": [
+        "petclinic-infra"
+      ],
+      "depends_on": [],
+      "targets": [
+        {
+          "component_key": "oracle-database",
+          "from": "19.3.0.0.0, no Release Update applied (db-inventory.yaml:6-7)",
+          "to": "19c RU 19.32 (Jul 2026 CPU) + Aug 2026 CSPU DB patch + Sep 2026 CSPU DB patch; MOS patch numbers UNVERIFIED (login required). Stays on 19c LTR unless decision D5 selects 26ai"
+        },
+        {
+          "component_key": "oracle-ojvm",
+          "from": "none applied (db-inventory.yaml:8)",
+          "to": "OJVM RU 19.32 matching the DB RU (patch number UNVERIFIED, MOS)"
+        }
+      ],
+      "intermediate_steps": [
+        "OPatch / RU prerequisites per the RU readme (UNVERIFIED - MOS login required)",
+        "Prefer out-of-place patching: clone the 19.3 Oracle home, patch the clone, switch the database to it (keeps the unpatched home for rollback)",
+        "RU 19.32 (cumulative - intermediate RUs 19.4..19.31 are not required)",
+        "OJVM RU 19.32 (requires the database in upgrade mode / downtime - decision D5 patch window)",
+        "Aug 2026 CSPU DB patch",
+        "Sep 2026 CSPU DB patch",
+        "datapatch -verbose, then utlrp.sql",
+        "Follow-up cycle, same procedure and gates: the next quarterly Oracle CPU once published (the report lists the next CPU date; no migration date is set here)",
+        "Post-deployment record (not a code change, not part of any wave patch): DBA updates petclinic-infra/oracle/db-inventory.yaml:6-8 to the verified patch level"
+      ],
+      "changes": [],
+      "entry_gates": [
+        {
+          "check": "Decision D5 approved (patch window, stay on 19c)",
+          "how": "Change ticket with DBA + security sign-off",
+          "pass_criterion": "Ticket approved by dba and security"
+        },
+        {
+          "check": "Full backup restorable",
+          "how": "RMAN> BACKUP DATABASE PLUS ARCHIVELOG; RMAN> RESTORE DATABASE VALIDATE;",
+          "pass_criterion": "Both commands complete with 0 RMAN- errors"
+        },
+        {
+          "check": "Guaranteed restore point",
+          "how": "SQL> CREATE RESTORE POINT pre_ru1932 GUARANTEE FLASHBACK DATABASE; SELECT name, guarantee_flashback_database FROM v$restore_point WHERE name='PRE_RU1932';",
+          "pass_criterion": "1 row, GUARANTEE_FLASHBACK_DATABASE = YES"
+        },
+        {
+          "check": "No patch conflicts",
+          "how": "$ORACLE_HOME/OPatch/opatch prereq CheckConflictAgainstOHWithDetail -ph <each unzipped patch dir>",
+          "pass_criterion": "Output 'Prereq \"checkConflictAgainstOHWithDetail\" passed.' for all four patches"
+        },
+        {
+          "check": "OS certification of RU 19.32 on Oracle Linux 7.6",
+          "how": "MOS certification matrix lookup by DBA (UNVERIFIED in the report)",
+          "pass_criterion": "Certified = yes, recorded in the ticket; otherwise stop and escalate to decision D8"
+        },
+        {
+          "check": "Rehearsal on a non-production clone of PETCLINIC",
+          "how": "Run this wave's full procedure and exit gates on the clone",
+          "pass_criterion": "All exit gates PASS on the clone"
+        },
+        {
+          "check": "Baseline recorded",
+          "how": "SELECT COUNT(*) FROM dba_objects WHERE status='INVALID'; SELECT comp_id,status FROM dba_registry;",
+          "pass_criterion": "Values recorded in the ticket as N0 / component list"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "SQL patches registered",
+          "how": "SELECT patch_id, action, status, description FROM dba_registry_sqlpatch ORDER BY action_time;",
+          "pass_criterion": "Rows for RU 19.32, OJVM RU 19.32, Aug 2026 CSPU and Sep 2026 CSPU, all ACTION=APPLY and STATUS=SUCCESS; 0 rows with STATUS<>'SUCCESS'"
+        },
+        {
+          "check": "Binary patches installed",
+          "how": "$ORACLE_HOME/OPatch/opatch lspatches",
+          "pass_criterion": "Lists the 4 patches of this wave"
+        },
+        {
+          "check": "Release level",
+          "how": "SELECT version_full FROM v$instance;",
+          "pass_criterion": "19.32.0.0.0"
+        },
+        {
+          "check": "Dictionary healthy",
+          "how": "@?/rdbms/admin/utlrp.sql; SELECT COUNT(*) FROM dba_objects WHERE status='INVALID'; SELECT comp_id,status FROM dba_registry;",
+          "pass_criterion": "INVALID count <= N0; every component (incl. JAVAVM) VALID"
+        },
+        {
+          "check": "Application regression (current clients)",
+          "how": "curl -s -o /dev/null -w '%{http_code}' http://petclinic-app01:9966/petclinic/api/owners ; run the nightly ops/healthcheck.py (Wave 2 version if already deployed)",
+          "pass_criterion": "HTTP 200 and healthcheck exit 0 (api counts == db counts). The current ojdbc6 11.2 client is already an unsupported combination - UNVERIFIED until this gate runs"
+        },
+        {
+          "check": "CVE count for the wave's components = 0",
+          "how": "python3 tools/report_cves.py impact-report.json oracle-database,oracle-ojvm  (26 CVEs) and tick each fixed_in level against dba_registry_sqlpatch",
+          "pass_criterion": "All 26 report CVEs have fixed_in <= RU 19.32 + Aug/Sep 2026 CSPU and those patches are STATUS=SUCCESS -> 0 open"
+        },
+        {
+          "check": "Restore point released",
+          "how": "SQL> DROP RESTORE POINT pre_ru1932;  (only after all gates above PASS)",
+          "pass_criterion": "Statement succeeds"
+        }
+      ],
+      "rollback": "Before datapatch completes or on any failed exit gate: shut down, switch the instance back to the retained unpatched 19.3 Oracle home (out-of-place patching) and run datapatch from that home to roll back the SQL changes; for OJVM follow the rollback section of the patch readme (UNVERIFIED - MOS). Last resort (data changes after the patch are lost, needs business sign-off): FLASHBACK DATABASE TO RESTORE POINT pre_ru1932; ALTER DATABASE OPEN RESETLOGS. Re-run the entry-gate baseline queries to confirm the pre-patch state.",
+      "approvers": [
+        "dba",
+        "security",
+        "platform-ops"
+      ],
+      "risk": "medium",
+      "effort": "M",
+      "evidence": [
+        "X01"
+      ],
+      "status": "NOT_PROVABLE_IN_SANDBOX"
+    },
+    {
+      "wave": 2,
+      "title": "Ops health check: CPython 3.6.8 -> 3.14.7, latest libraries, cx_Oracle -> python-oracledb (Thin)",
+      "component_keys": [
+        "python",
+        "requests",
+        "urllib3",
+        "pyyaml",
+        "jinja2",
+        "cx-oracle"
+      ],
+      "modules": [
+        "petclinic-infra"
+      ],
+      "depends_on": [],
+      "targets": [
+        {
+          "component_key": "python",
+          "from": "3.6.8 (runtime.txt:1, db-inventory.yaml:14)",
+          "to": "3.14.7"
+        },
+        {
+          "component_key": "requests",
+          "from": "2.19.1",
+          "to": "2.34.2"
+        },
+        {
+          "component_key": "urllib3",
+          "from": "1.23",
+          "to": "2.8.0"
+        },
+        {
+          "component_key": "pyyaml",
+          "from": "3.12",
+          "to": "6.0.3"
+        },
+        {
+          "component_key": "jinja2",
+          "from": "2.10",
+          "to": "3.1.6"
+        },
+        {
+          "component_key": "cx-oracle",
+          "from": "cx_Oracle 6.4.1",
+          "to": "python-oracledb (oracledb) 26.0.1, Thin mode"
+        }
+      ],
+      "intermediate_steps": [
+        "No mandatory intermediate versions (the new libraries install directly on 3.14.7, B26/P05)",
+        "platform-ops installs CPython 3.14.7 on petclinic-app01 side by side with 3.6.8 and creates a dedicated venv from ops/requirements.txt; the cron entry is switched to the new venv only after the exit gates pass",
+        "Post-deployment record (not a code change): DBA updates petclinic-infra/oracle/db-inventory.yaml:14 to python 3.14.7"
+      ],
+      "changes": [
+        {
+          "description": "Declared runtime python-3.6.8 (EOL) -> python-3.14.7",
+          "file": "petclinic-infra/ops/runtime.txt",
+          "line": 1,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "requests==2.19.1 -> requests==2.34.2 (old pins cannot be imported on 3.14, B25)",
+          "file": "petclinic-infra/ops/requirements.txt",
+          "line": 1,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "urllib3==1.23 -> urllib3==2.8.0 (same breaking change as line 1: 'No module named urllib3.packages.six.moves', B25)",
+          "file": "petclinic-infra/ops/requirements.txt",
+          "line": 2,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "PyYAML==3.12 -> PyYAML==6.0.3 (3.12 does not build on 3.14, B24/P03)",
+          "file": "petclinic-infra/ops/requirements.txt",
+          "line": 3,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "cx_Oracle==6.4.1 -> oracledb==26.0.1 (python-oracledb, Thin mode, no Oracle Client)",
+          "file": "petclinic-infra/ops/requirements.txt",
+          "line": 4,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "Jinja2==2.10 -> Jinja2==3.1.6",
+          "file": "petclinic-infra/ops/requirements.txt",
+          "line": 5,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "import collections -> import collections.abc (needed by the :21 fix)",
+          "file": "petclinic-infra/ops/healthcheck.py",
+          "line": 7,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "import cx_Oracle -> import oracledb",
+          "file": "petclinic-infra/ops/healthcheck.py",
+          "line": 10,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "yaml.load(f) -> yaml.safe_load(f) (PyYAML 6 API; closes the CVE-2017-18342/CVE-2020-14343 call pattern)",
+          "file": "petclinic-infra/ops/healthcheck.py",
+          "line": 20,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "collections.Mapping -> collections.abc.Mapping (removed in Python 3.10)",
+          "file": "petclinic-infra/ops/healthcheck.py",
+          "line": 21,
+          "impact_ref": "IMP-INFRA-PY"
+        },
+        {
+          "description": "cx_Oracle.connect(user, password, dsn) -> oracledb.connect(user=..., password=..., dsn=...) (keyword-only API)",
+          "file": "petclinic-infra/ops/healthcheck.py",
+          "line": 34,
+          "impact_ref": "IMP-INFRA-PY"
+        }
+      ],
+      "entry_gates": [
+        {
+          "check": "Target interpreter available on petclinic-app01",
+          "how": "/opt/python-3.14.7/bin/python3.14 --version  (sandbox: P02)",
+          "pass_criterion": "Prints 'Python 3.14.7'"
+        },
+        {
+          "check": "Negative control: as-is pins do not work on 3.14.7",
+          "how": "python3.14 -m venv v && v/bin/pip install -r ops/requirements.txt (as-is)  (sandbox: P03)",
+          "pass_criterion": "Install fails (PyYAML 3.12 longintrepr.h) - confirms the wave is needed"
+        },
+        {
+          "check": "Password substitution mechanism known (NEW finding, decision D11)",
+          "how": "Platform-ops documents how '${ORACLE_RO_PASSWORD}' in ops/healthcheck.yaml:5 is substituted in production (the script itself does no environment expansion, neither before nor after this wave)",
+          "pass_criterion": "Mechanism documented in the change ticket"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "W2-G1 install",
+          "how": "python3.14 -m venv /tmp/venv-w2 && /tmp/venv-w2/bin/pip install -r ops/requirements.txt  (P05, P15)",
+          "pass_criterion": "exit 0; 'Successfully installed ... oracledb-26.0.1 ... requests-2.34.2 urllib3-2.8.0 PyYAML-6.0.3 Jinja2-3.1.6'"
+        },
+        {
+          "check": "W2-G2..G5 exact pins, import, config, DB call shape",
+          "how": "/tmp/venv-w2/bin/python evidence/w2_gate_tests.py offline  (run in petclinic-infra/; P06, P15)",
+          "pass_criterion": "21/21 checks PASS, 'SUMMARY: 0 failed check(s)', exit 0"
+        },
+        {
+          "check": "W2-G6 Thin mode without Oracle Client",
+          "how": "/tmp/venv-w2/bin/python evidence/w2_gate_tests.py thin 127.0.0.1:1/PETCLINIC  (P07)",
+          "pass_criterion": "DPY-6005 network error and no DPI-1047 (Oracle Client) error; exit 0"
+        },
+        {
+          "check": "W2-G7 CVE count for the wave's components = 0",
+          "how": "pip-audit --vulnerability-service osv -r ops/requirements.txt ; pip-audit --vulnerability-service osv --path <venv>/lib/python3.14/site-packages  (P08; negative control P09)",
+          "pass_criterion": "'No known vulnerabilities found' for both (pins and all transitive packages); 24/24 report CVEs of these keys closed"
+        },
+        {
+          "check": "W2-G8 REST contract unchanged for the ops script",
+          "how": "/tmp/venv-w2/bin/python evidence/w2_gate_tests.py api http://<backend>:9966/petclinic/api/ <owners> <vets>  (sandbox: v1.5.2 on JDK 8u504, P11/P15)",
+          "pass_criterion": "api_counts == counts of the current backend (sandbox: {'owners': 10, 'vets': 6}), exit 0"
+        },
+        {
+          "check": "W2-G9 end-to-end against Oracle PETCLINIC (production/staging only)",
+          "how": "cd petclinic-infra && /opt/petclinic-ops/venv/bin/python ops/healthcheck.py; echo $?",
+          "pass_criterion": "exit 0 and api == db for owners and vets. NOT PROVABLE IN SANDBOX (no Oracle DB, X01) - to be run by platform-ops at rollout"
+        },
+        {
+          "check": "Patch integrity",
+          "how": "cd petclinic-infra && git apply --check wave-2.patch  (fresh extraction of the pinned tarball; P13)",
+          "pass_criterion": "exit 0; result byte-identical to the proven tree"
+        }
+      ],
+      "rollback": "No data or schema change (read-only account). Re-point the cron entry to the retained Python 3.6.8 environment and revert the files with `git apply -R wave-2.patch` (rehearsed in P14: tree byte-identical to the pinned baseline). The old venv is kept until W2-G9 has passed on production.",
+      "approvers": [
+        "platform-ops",
+        "security",
+        "tech-lead"
+      ],
+      "risk": "low",
+      "effort": "S",
+      "evidence": [
+        "B24",
+        "B25",
+        "B26",
+        "R07",
+        "R08",
+        "P02",
+        "P03",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10",
+        "P11",
+        "P13",
+        "P14",
+        "P15",
+        "P16"
+      ],
+      "status": "PARTIALLY_PROVEN"
+    },
+    {
+      "wave": 3,
+      "title": "Safety net and build toolchain: REST contract + UI smoke tests, Maven Wrapper 3.3.3 -> 3.9.16, remove jcenter",
+      "component_keys": [
+        "apache-maven"
+      ],
+      "modules": [
+        "petclinic-rest",
+        "petclinic-angular",
+        "petclinic-infra"
+      ],
+      "depends_on": [],
+      "targets": [
+        {
+          "component_key": "apache-maven",
+          "from": "3.3.3 (Maven Wrapper, maven-wrapper.properties:1)",
+          "to": "3.9.16"
+        }
+      ],
+      "intermediate_steps": [
+        "Freeze the REST contract from the as-is backend (report R01 capture + sandbox capture P12: 7 GETs, status, Content-Type, body) into contract tests shared by petclinic-rest, petclinic-angular and the ops script",
+        "Add a headless UI smoke test (R09-R12 style) and make it a release gate (decision D7)",
+        "Maven Wrapper -> 3.9.16 and removal of the jcenter repository (both work with the current Boot 1.5.2 code on JDK 8: W3-P01)",
+        "CI JDK and CI Node are NOT changed here: the current code does not build on JDK 17+ (B01/B02) and the current Angular 6 toolchain does not build on current Node (B15/B17); they move with Waves 4 and 5"
+      ],
+      "changes": [
+        {
+          "description": "distributionUrl apache-maven 3.3.3 -> 3.9.16 (Boot 4 plugins need Maven >= 3.6.3, B27; 3.3.3 has CVE-2021-26291)",
+          "file": "spring-petclinic-rest/.mvn/wrapper/maven-wrapper.properties",
+          "line": 1,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Remove the <repositories> block with jcenter (lines 33-40); Maven Central resolves everything (W3-P01 with an empty local repo, 0 jcenter downloads)",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 38,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Add REST contract tests: 7 GETs (owners, owners/1, pets, vets, visits, pettypes, specialties) JSON-equal to the frozen 1.5.2 snapshot, dates 'yyyy/MM/dd', context path /petclinic/, anonymous access, POST /api/owners -> 201",
+          "file": "spring-petclinic-rest/src/test/java/org/springframework/samples/petclinic/contract/RestContractTests.java",
+          "line": "new file",
+          "impact_ref": "NEW"
+        },
+        {
+          "description": "Add a headless UI smoke test: owners list rows == GET /owners count, owner 1 page shows '2010/09/07' (R09/R12 criteria)",
+          "file": "spring-petclinic-angular/e2e/smoke/owners.smoke.spec.ts",
+          "line": "new file",
+          "impact_ref": "NEW"
+        },
+        {
+          "description": "Add the ops-script contract check (healthcheck.api_counts over /owners and /vets at the URL of healthcheck.yaml:1, JSON lists, no credentials) as a CI test of petclinic-infra (same logic as evidence/w2_gate_tests.py 'api' mode)",
+          "file": "petclinic-infra/ops/test_contract.py",
+          "line": "new file",
+          "impact_ref": "NEW"
+        }
+      ],
+      "entry_gates": [
+        {
+          "check": "As-is baseline measured",
+          "how": "JAVA_HOME=<JDK 8u504> ./mvnw -B clean package  (P10)",
+          "pass_criterion": "BUILD SUCCESS, 'Tests run: 169, Failures: 0, Errors: 0, Skipped: 0'"
+        },
+        {
+          "check": "Contract snapshot captured",
+          "how": "curl the 7 GETs against v1.5.2 (P12; report R01 evidence/contract-asis-1.5.2/)",
+          "pass_criterion": "7 x HTTP 200 application/json;charset=UTF-8; owner 1 pet birthDate '2010/09/07'"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "Wrapper version",
+          "how": "./mvnw -v",
+          "pass_criterion": "First line 'Apache Maven 3.9.16'"
+        },
+        {
+          "check": "Build green from Maven Central only",
+          "how": "JAVA_HOME=<JDK 8> ./mvnw -B -Dmaven.repo.local=$(mktemp -d) clean package | tee build.log  (W3-P01)",
+          "pass_criterion": "BUILD SUCCESS; 'Tests run: 169, Failures: 0, Errors: 0, Skipped: 0' (= baseline P10)"
+        },
+        {
+          "check": "No jcenter",
+          "how": "grep -cE '(Downloading|Downloaded) from jcenter' build.log ; grep -c jcenter pom.xml  (W3-P02)",
+          "pass_criterion": "0 and 0"
+        },
+        {
+          "check": "Contract tests green on the current backend",
+          "how": "./mvnw -B -Dtest=RestContractTests test",
+          "pass_criterion": "All contract tests pass (7 GET + 1 POST), 0 failures"
+        },
+        {
+          "check": "UI smoke green on the current front-end + backend",
+          "how": "npx playwright test e2e/smoke (Angular 6 bundle vs v1.5.2)",
+          "pass_criterion": "All smoke checks pass; owner rows == GET /owners count"
+        },
+        {
+          "check": "CVE count for the wave's components = 0",
+          "how": "curl -s -X POST https://api.osv.dev/v1/query -d '{\"package\":{\"name\":\"org.apache.maven:maven-core\",\"ecosystem\":\"Maven\"},\"version\":\"3.9.16\"}'  (W3-P02)",
+          "pass_criterion": "Response {} (0 advisories); 3.3.3 returns GHSA-2f88-5hg8-9x2x (negative control)"
+        }
+      ],
+      "rollback": "Build-time only, no runtime artifact changes: git revert of the wave commits restores maven-wrapper.properties and the <repositories> block; contract/smoke tests are additive and can be disabled without affecting the product.",
+      "approvers": [
+        "tech-lead",
+        "security"
+      ],
+      "risk": "low",
+      "effort": "M",
+      "evidence": [
+        "B27",
+        "R01",
+        "P10",
+        "P12",
+        "W3-P01",
+        "W3-P02",
+        "T01"
+      ],
+      "status": "PARTIALLY_PROVEN"
+    },
+    {
+      "wave": 4,
+      "title": "petclinic-rest: Spring Boot 1.5.2 -> 2.7.18 -> 3.5.16 -> 4.1.1 on Temurin 25, with app-server JDK, Tomcat 11.0.26, ojdbc17 and OracleDialect in ONE release (Jackson 2 bridge)",
+      "component_keys": [
+        "spring-boot",
+        "spring-framework",
+        "spring-security",
+        "spring-data-jpa",
+        "spring-data-commons",
+        "spring-retry",
+        "spring-data-jdbc-ext",
+        "apache-tomcat",
+        "jackson-core",
+        "hibernate-orm",
+        "hibernate-validator",
+        "dom4j",
+        "logback",
+        "snakeyaml",
+        "springfox",
+        "guava",
+        "hsqldb",
+        "mysql-connector-j",
+        "postgresql-jdbc",
+        "jaxb-api",
+        "aspectj",
+        "jdk",
+        "ojdbc",
+        "hibernate-oracle-dialect",
+        "junit",
+        "mockito",
+        "assertj",
+        "json-path",
+        "json-smart"
+      ],
+      "modules": [
+        "petclinic-rest",
+        "petclinic-infra"
+      ],
+      "depends_on": [
+        1,
+        3
+      ],
+      "targets": [
+        {
+          "component_key": "spring-boot",
+          "from": "1.5.2.RELEASE",
+          "to": "4.1.1 (via non-deployed transit steps 2.7.18 and 3.5.16)"
+        },
+        {
+          "component_key": "spring-framework",
+          "from": "4.3.7.RELEASE",
+          "to": "7.0.9 (Boot 4.1.1-managed)"
+        },
+        {
+          "component_key": "spring-security",
+          "from": "4.2.2.RELEASE",
+          "to": "7.1.1 (Boot 4.1.1-managed)"
+        },
+        {
+          "component_key": "spring-data-jpa",
+          "from": "1.11.1.RELEASE",
+          "to": "4.1.1 (Boot 4.1.1-managed)"
+        },
+        {
+          "component_key": "spring-data-commons",
+          "from": "1.13.1.RELEASE",
+          "to": "4.1.1 (Boot 4.1.1-managed)"
+        },
+        {
+          "component_key": "spring-retry",
+          "from": "1.2.0.RELEASE (would resolve 1.0.3.RELEASE in the naive Boot 4 tree, S01)",
+          "to": "removed from the tree together with spring-data-jdbc-core; 2.0.13 if a direct use is ever needed"
+        },
+        {
+          "component_key": "spring-data-jdbc-ext",
+          "from": "spring-data-jdbc-core 1.2.1.RELEASE (abandoned)",
+          "to": "removed (extractor re-implemented in-repo)"
+        },
+        {
+          "component_key": "apache-tomcat",
+          "from": "8.5.11",
+          "to": "11.0.26 (<tomcat.version> override of the Boot-managed 11.0.24, mandatory - 3 CRITICAL CVEs, decision D3)"
+        },
+        {
+          "component_key": "jackson-core",
+          "from": "2.8.7",
+          "to": "Boot 4.1.1-managed Jackson 2 line via spring-boot-jackson2 (2.21.5 per report), or 2.22.3 if decision D3 overrides"
+        },
+        {
+          "component_key": "hibernate-orm",
+          "from": "5.0.12.Final",
+          "to": "7.4.5.Final (Boot-managed) or 7.4.10.Final (decision D3)"
+        },
+        {
+          "component_key": "hibernate-validator",
+          "from": "5.3.4.Final",
+          "to": "9.1.3.Final (Boot-managed) or 9.1.4.Final (decision D3)"
+        },
+        {
+          "component_key": "dom4j",
+          "from": "1.6.1",
+          "to": "removed (not a dependency of Hibernate 6+)"
+        },
+        {
+          "component_key": "logback",
+          "from": "1.1.11",
+          "to": "1.5.38 (Boot-managed) or 1.6.3 (decision D3)"
+        },
+        {
+          "component_key": "snakeyaml",
+          "from": "1.17",
+          "to": "2.6 (Boot-managed; no advisory in S01) - latest 2.7"
+        },
+        {
+          "component_key": "springfox",
+          "from": "2.6.1",
+          "to": "springdoc-openapi-starter-webmvc-ui 3.1.1"
+        },
+        {
+          "component_key": "guava",
+          "from": "18.0 (transitive of springfox)",
+          "to": "removed from the tree with springfox (gate: dependency:tree has 0 guava 18.0)"
+        },
+        {
+          "component_key": "hsqldb",
+          "from": "2.3.3",
+          "to": "2.7.3 (Boot-managed; no advisory in S01) - latest 2.7.4"
+        },
+        {
+          "component_key": "mysql-connector-j",
+          "from": "mysql:mysql-connector-java 5.1.41",
+          "to": "com.mysql:mysql-connector-j 9.7.0 (Boot-managed) - latest 26.7.0"
+        },
+        {
+          "component_key": "postgresql-jdbc",
+          "from": "9.4.1212.jre7",
+          "to": "Boot 4.1.1-managed version (exact version not recorded in the report: UNVERIFIED) - latest 42.7.13"
+        },
+        {
+          "component_key": "jaxb-api",
+          "from": "javax.xml.bind:jaxb-api 2.3.0",
+          "to": "jakarta.xml.bind:jakarta.xml.bind-api (latest 4.0.5)"
+        },
+        {
+          "component_key": "aspectj",
+          "from": "1.8.9 (spring-boot-starter-aop)",
+          "to": "spring-boot-starter-aspectj (AspectJ latest 1.9.25.1)"
+        },
+        {
+          "component_key": "jdk",
+          "from": "JDK 1.8.0_161 (petclinic-app01), java.version 1.8, CI oraclejdk8",
+          "to": "Temurin 25.0.4.1 on petclinic-app01, java.version 25, CI Temurin 25 (decision D1)"
+        },
+        {
+          "component_key": "ojdbc",
+          "from": "com.oracle:ojdbc6 11.2.0.4",
+          "to": "com.oracle.database.jdbc:ojdbc17 23.26.3.0.0"
+        },
+        {
+          "component_key": "hibernate-oracle-dialect",
+          "from": "org.hibernate.dialect.Oracle10gDialect",
+          "to": "org.hibernate.dialect.OracleDialect (auto-detected; spring.jpa.database-platform removed)"
+        },
+        {
+          "component_key": "junit",
+          "from": "4.12",
+          "to": "JUnit Jupiter 6.1.3 (via spring-boot-starter-test 4.1.1)"
+        },
+        {
+          "component_key": "mockito",
+          "from": "1.10.19",
+          "to": "Boot 4.1.1-managed Mockito 5.x (latest 5.24.0)"
+        },
+        {
+          "component_key": "assertj",
+          "from": "2.6.0",
+          "to": "Boot 4.1.1-managed AssertJ 3.x (latest 3.27.7)"
+        },
+        {
+          "component_key": "json-path",
+          "from": "2.2.0",
+          "to": "Boot 4.1.1-managed (latest 3.0.0)"
+        },
+        {
+          "component_key": "json-smart",
+          "from": "2.2.1",
+          "to": "Boot 4.1.1-managed (latest 2.6.0)"
+        }
+      ],
+      "intermediate_steps": [
+        "T1 - transit, NOT deployed: Spring Boot 2.7.18 on JDK 17 (last 2.x; the Boot 3.0 guide requires 2.7 first): parent 2.7.18, com.mysql:mysql-connector-j, spring-boot-starter-validation, org.springframework.boot.web.servlet.support, remove the orm.hibernate3 import, server.servlet.context-path, spring.sql.init.*, explicit permitAll security config replacing security.ignored. Gate T1 below. Status: UNPROVEN (B05 drop-in FAIL only)",
+        "T2 - transit, NOT deployed (3.5.x OSS ended): Spring Boot 3.5.16 on JDK 17: javax -> jakarta, WebSecurityConfigurerAdapter -> SecurityFilterChain + @EnableMethodSecurity, springfox -> springdoc (springdoc version for Boot 3.5 UNVERIFIED in the report), JUnit 4 -> JUnit Jupiter. Gate T2 below. Status: UNPROVEN (B06/B07 FAIL - partial)",
+        "T3 - release: Spring Boot 4.1.1 on Temurin 25.0.4.1: spring-boot-starter-aspectj, MediaType.APPLICATION_JSON_VALUE (33 usages), @MockitoBean, spring-boot-jackson2 + preferred-json-mapper=jackson2, <tomcat.version>11.0.26</tomcat.version>, java.version 25, spring-data-jdbc-core removed, springdoc 3.1.1, jakarta.xml.bind-api (proven variant B12/B14/R05)",
+        "Deploy T3 as ONE release: Boot 4.1.1 WAR + petclinic-infra oracle profile (ojdbc17, no dialect) + petclinic-app01 JDK switch to Temurin 25.0.4.1 (cross-module: db-inventory.yaml:13 JDK must move with the WAR)",
+        "Post-deployment record (not a code change): DBA updates petclinic-infra/oracle/db-inventory.yaml:12-13 (runs: Boot 4.1.1 / jdk: 25.0.4.1)"
+      ],
+      "changes": [
+        {
+          "description": "Parent 1.5.2.RELEASE must move through 2.7.18 and 3.5.16 before 4.1.1",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 17,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "java.version 1.8: Boot 4.1.1 compiler plugin aborts \"Fatal error compiling: error: release version 1.8 not supported\" (B09); Boot 3/4 need Java 17+",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 24,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "spring-boot-starter-aop has no managed version in Boot 4 (renamed spring-boot-starter-aspectj) -> POM invalid (B08); still needed because CallMonitoringAspect.java:38 uses @Aspect",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 45,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "mysql:mysql-connector-java no longer managed (relocated to com.mysql:mysql-connector-j) -> POM invalid (B08)",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 73,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "spring-data-jdbc-core 1.2.1 (abandoned) drags spring-retry 1.0.3.RELEASE (CVE-2026-41710) because Boot 4 removed Spring Retry management (S01); used by JdbcPetVisitExtractor.java:18,30 and JdbcOwnerRepositoryImpl.java:121",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 85,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Springfox 2.6.1 is javax.servlet-based and has no Boot 3/4 support -> replaced by springdoc-openapi-starter-webmvc-ui 3.1.1 in the proven variant",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 127,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Springfox configuration (@EnableSwagger2, Docket) must be deleted/rewritten for springdoc",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/util/ApplicationSwaggerConfig.java",
+          "line": 40,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "javax.xml.bind:jaxb-api -> jakarta.xml.bind-api (Vets.java:21, Vet.java:30 import javax.xml.bind.annotation)",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 150,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "javax.persistence -> jakarta.persistence: 134 x \"package javax.persistence does not exist\" on Boot 3.5/4.1 (B06/B10), e.g. BaseEntity",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+          "line": 18,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "javax.transaction.Transactional -> jakarta.transaction",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/OwnerRestController.java",
+          "line": 21,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "javax.servlet.http.HttpServletResponse -> jakarta.servlet",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/RootRestController.java",
+          "line": 21,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Bean Validation no longer pulled by the web starter (Boot 2.3+): javax.validation missing (B05) -> add spring-boot-starter-validation",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/OwnerRestController.java",
+          "line": 22,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "org.hibernate.validator.constraints.NotEmpty removed (Hibernate Validator 9) -> jakarta.validation.constraints.NotEmpty (also Owner.java:32, Person.java:21, Visit.java:28) (B05/B11)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/NamedEntity.java",
+          "line": 21,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "org.springframework.boot.web.support.SpringBootServletInitializer moved to org.springframework.boot.web.servlet.support (B06/B10/B11)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/PetClinicApplication.java",
+          "line": 6,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Unused import of org.springframework.orm.hibernate3.support.OpenSessionInViewFilter (package removed in Spring 5) (B11)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/repository/jpa/JpaOwnerRepositoryImpl.java",
+          "line": 26,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "MediaType.APPLICATION_JSON_UTF8_VALUE removed in Spring Framework 7 (33 usages; B11 \"cannot find symbol\"); Content-Type changes from application/json;charset=UTF-8 to application/json (R05)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/OwnerRestController.java",
+          "line": 55,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "WebSecurityConfigurerAdapter / antMatchers removed (B07 on 3.5.16, B11 on 4.1.1): rewrite as SecurityFilterChain + JdbcUserDetailsManager; @EnableGlobalMethodSecurity (:16) -> @EnableMethodSecurity",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/security/BasicAuthenticationAdapter.java",
+          "line": 18,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "server.context-path renamed server.servlet.context-path and is silently ignored: app served at \"/\" (R03 \"context path '/'\") and /petclinic/api/* — the URL used by petclinic-angular and ops/healthcheck.py — disappears",
+          "file": "spring-petclinic-rest/src/main/resources/application.properties",
+          "line": 24,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "security.ignored=/** removed: every endpoint returns HTTP 401 with a generated password (R03); replace with an explicit permitAll SecurityFilterChain when basic.authentication.enabled=false (proven R04/R05)",
+          "file": "spring-petclinic-rest/src/main/resources/application.properties",
+          "line": 36,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "spring.datasource.schema/data removed -> use spring.sql.init.schema-locations/data-locations (also line 5); migrated in the proven variant R04/R05",
+          "file": "spring-petclinic-rest/src/main/resources/application-hsqldb.properties",
+          "line": 4,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Boot 4 uses Jackson 3 by default and ignores the Jackson 2 @JsonSerialize/@JsonDeserialize (Owner.java:53-54, Pet.java:55-56, Visit.java:44-45): \"Document nesting depth (501) exceeds the maximum allowed\" and ISO birthDate (R04); fixed by spring-boot-jackson2 + spring.http.converters.preferred-json-mapper=jackson2 (R05: 7/7 GETs identical)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+          "line": 53,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Tests: JUnit 4 (org.junit) not provided by spring-boot-starter-test 4.1.1 -> \"package org.junit does not exist\" (B13); migrate to JUnit Jupiter",
+          "file": "spring-petclinic-rest/src/test/java/org/springframework/samples/petclinic/model/ValidatorTests.java",
+          "line": 11,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Tests: @MockBean (org.springframework.boot.test.mock.mockito) removed -> @MockitoBean (B13)",
+          "file": "spring-petclinic-rest/src/test/java/org/springframework/samples/petclinic/rest/PetRestControllerTests.java",
+          "line": 37,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Tests: expected message \"may not be empty\" becomes \"must not be empty\" with Hibernate Validator 9 (not executed this run — tests do not compile, B13)",
+          "file": "spring-petclinic-rest/src/test/java/org/springframework/samples/petclinic/model/ValidatorTests.java",
+          "line": 42,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Tests: @ActiveProfiles(\"jdbc, hsqldb\") is ONE profile name containing a comma (not executed this run — tests do not compile, B13); split into {\"jdbc\",\"hsqldb\"}",
+          "file": "spring-petclinic-rest/src/test/java/org/springframework/samples/petclinic/service/clinicService/ClinicServiceJdbcTests.java",
+          "line": 32,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Boot 4.1.1 manages tomcat-embed-core 11.0.24 (3 CRITICAL CVEs, S01) -> add <tomcat.version>11.0.26</tomcat.version> to the properties block",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 21,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "CI declares oraclejdk8 -> Temurin 25",
+          "file": "spring-petclinic-rest/.travis.yml",
+          "line": 2,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Spring 4.3 CGLIB proxies need ClassLoader.defineClass: 168 of 169 tests error with InaccessibleObjectException on JDK 17 (B01)",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 17,
+          "impact_ref": "IMP-REST-JDK"
+        },
+        {
+          "description": "maven-war-plugin 2.6 inherited from the Boot 1.5.2 parent fails on JDK 17 (XStream reflection on java.util.TreeMap) unless MAVEN_OPTS --add-opens (B02/B03)",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 9,
+          "impact_ref": "IMP-REST-JDK"
+        },
+        {
+          "description": "Hibernate Validator 5.3.4 on JDK 17: POST /api/owners with a valid body -> 400 \"HV000041: Call to TraversableResolver.isReachable() threw an exception\" (R01; Boot 4.1.1 returns 201). Root cause not isolated (UNVERIFIED)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/OwnerRestController.java",
+          "line": 89,
+          "impact_ref": "IMP-REST-JDK"
+        },
+        {
+          "description": "com.oracle:ojdbc6:11.2.0.4 is not on Maven Central -> \"Could not find artifact com.oracle:ojdbc6:jar:11.2.0.4\" when the profile is merged (B04); ojdbc6 = JDK 6-8 only",
+          "file": "petclinic-infra/maven/oracle-profile.xml",
+          "line": 7,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "org.hibernate.dialect.Oracle10gDialect does not exist in Hibernate 7 -> StrategySelectionException at startup (R06)",
+          "file": "petclinic-infra/maven/oracle-profile.xml",
+          "line": 13,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "The profile sets spring.datasource.url / spring.jpa.database-platform as MAVEN <properties>; application.properties has no @...@ placeholders, so they do not reach Spring at runtime (how production injects them is UNVERIFIED)",
+          "file": "petclinic-infra/maven/oracle-profile.xml",
+          "line": 11,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "Entities use GenerationType.IDENTITY while the Oracle DDL defines sequences and plain NUMBER(10) keys (schema.sql:2-5, 8) -> JPA inserts on Oracle would fail unless triggers exist (static analysis; no Oracle DB in sandbox, UNVERIFIED)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+          "line": 34,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "Oracle schema has no users/roles tables but BasicAuthenticationAdapter.java:38-39 queries them -> enabling basic auth on Oracle would fail (static analysis, UNVERIFIED)",
+          "file": "petclinic-infra/oracle/schema.sql",
+          "line": 7,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "Replace org.springframework.data.jdbc.core.OneToManyResultSetExtractor (spring-data-jdbc-core, abandoned; drags spring-retry 1.0.3 with CVE-2026-41710) by an in-repo ResultSetExtractor; also JdbcPetVisitExtractor.java:30 and JdbcOwnerRepositoryImpl.java:121",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/repository/jdbc/JdbcPetVisitExtractor.java",
+          "line": 18,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Add spring.http.converters.preferred-json-mapper=jackson2 next to the spring-boot-jackson2 dependency (R05: 7/7 GETs identical; removed again in Wave 6)",
+          "file": "spring-petclinic-rest/src/main/resources/application.properties",
+          "line": "37 (insert after)",
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "@EnableGlobalMethodSecurity -> @EnableMethodSecurity (part of the SecurityFilterChain rewrite)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/security/BasicAuthenticationAdapter.java",
+          "line": 16,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "javax.xml.bind.annotation -> jakarta.xml.bind.annotation (also Vet.java:30)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/Vets.java",
+          "line": 21,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "@CrossOrigin must stay effective after the SecurityFilterChain rewrite (cors() enabled in the chain) - Angular is served from another origin",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/OwnerRestController.java",
+          "line": 47,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "oracle profile: com.oracle:ojdbc6:11.2.0.4 -> com.oracle.database.jdbc:ojdbc17:23.26.3.0.0 (listed for DB 19c, JDK 17+ incl. 25); same line as IMP-INFRA-DB breaking change 2",
+          "file": "petclinic-infra/maven/oracle-profile.xml",
+          "line": 6,
+          "impact_ref": "IMP-INFRA-JDBC"
+        },
+        {
+          "description": "CI: jdk oraclejdk8 -> Temurin 25 (moves with the code: the current code does not build on JDK 17+, B01)",
+          "file": "spring-petclinic-rest/.travis.yml",
+          "line": 2,
+          "impact_ref": "IMP-REST-BOOT4"
+        }
+      ],
+      "entry_gates": [
+        {
+          "check": "Wave 1 closed (DB patched)",
+          "how": "Wave 1 exit gates signed off",
+          "pass_criterion": "All Wave 1 exit gates PASS"
+        },
+        {
+          "check": "Wave 3 closed (safety net in place)",
+          "how": "Wave 3 exit gates signed off",
+          "pass_criterion": "Contract tests + UI smoke green on v1.5.2; Maven 3.9.16 wrapper; no jcenter"
+        },
+        {
+          "check": "Decisions D1, D2, D3, D4, D9 approved",
+          "how": "Decision log",
+          "pass_criterion": "All five approved by the owners listed in blocking_decisions"
+        },
+        {
+          "check": "Target JDK installed on staging app server",
+          "how": "/opt/temurin-25.0.4.1/bin/java -version",
+          "pass_criterion": "Reports 25.0.4.1"
+        },
+        {
+          "check": "Oracle staging schema available",
+          "how": "SQL*Plus / sqlcl connect to a staging copy of PETCLINIC at RU 19.32",
+          "pass_criterion": "Connection OK; schema changes from D9 applied there"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "T1 transit build (Boot 2.7.18, not deployed)",
+          "how": "JAVA_HOME=<JDK 17> ./mvnw -B clean verify",
+          "pass_criterion": "BUILD SUCCESS; Tests run: 169, Failures: 0, Errors: 0 (baseline P10); contract tests unchanged"
+        },
+        {
+          "check": "T2 transit build (Boot 3.5.16, not deployed)",
+          "how": "JAVA_HOME=<JDK 17> ./mvnw -B clean verify",
+          "pass_criterion": "BUILD SUCCESS; Tests run: 169, Failures: 0, Errors: 0; contract tests unchanged"
+        },
+        {
+          "check": "Release build on Java 25",
+          "how": "JAVA_HOME=<Temurin 25.0.4.1> ./mvnw -B clean verify | tee build.log",
+          "pass_criterion": "BUILD SUCCESS; build.log contains 'release 25'; 'Tests run: 169, Failures: 0, Errors: 0, Skipped: 0' - every baseline test preserved (B13 currently FAILS: tests do not compile)"
+        },
+        {
+          "check": "REST contract unchanged",
+          "how": "./mvnw -B -Dtest=RestContractTests test against the Boot 4.1.1 WAR (context path /petclinic/)",
+          "pass_criterion": "7/7 GET bodies JSON-identical to the 1.5.2 snapshot (R05), POST /petclinic/api/owners -> 201, no 401 for anonymous calls; only documented delta: Content-Type 'application/json' instead of 'application/json;charset=UTF-8' (R05)"
+        },
+        {
+          "check": "Current Angular 6 UI still works",
+          "how": "UI smoke (Wave 3) with the Angular 6 bundle against the Boot 4.1.1 WAR",
+          "pass_criterion": "owner rows == GET /owners count and owner 1 shows '2010/09/07' (R09)"
+        },
+        {
+          "check": "Ops script still works",
+          "how": "evidence/w2_gate_tests.py api http://<staging>:9966/petclinic/api/ <owners> <vets>",
+          "pass_criterion": "exit 0, no JSONDecodeError (R08 bridge variant)"
+        },
+        {
+          "check": "Runtime versions",
+          "how": "grep -E 'Apache Tomcat/|Java version|release 25' app.log build.log; java -version on petclinic-app01",
+          "pass_criterion": "'Apache Tomcat/11.0.26' and Temurin 25.0.4.1"
+        },
+        {
+          "check": "Removed artifacts stay removed",
+          "how": "./mvnw -B dependency:tree | grep -cE 'spring-data-jdbc-core|springfox|guava:jar:18.0|dom4j:dom4j:jar:1.6.1|spring-retry:jar:1.0.3|com.oracle:ojdbc6'",
+          "pass_criterion": "0"
+        },
+        {
+          "check": "CVE count for the wave's components = 0",
+          "how": "./mvnw -B -q dependency:list -DincludeScope=test -DoutputFile=target/deps.txt && python3 tools/osv_maven.py target/deps.txt --scope test  (tool validated by negative control T01: 225 advisories on 1.5.2)",
+          "pass_criterion": "'OSV advisories: 0', exit 0 (S01 failed only on spring-retry 1.0.3 and tomcat 11.0.24, both removed/overridden here); report CVEs of the jdk key closed by Temurin 25.0.4.1"
+        },
+        {
+          "check": "Oracle path (staging, not provable in sandbox)",
+          "how": "mvn -Poracle package; start with SPRING_DATASOURCE_URL=jdbc:oracle:thin:@<staging>:1521/PETCLINIC; POST /petclinic/api/owners; GET it back",
+          "pass_criterion": "Startup log shows OracleDialect, no StrategySelectionException (R06); POST 201 and row persisted (validates the IDENTITY/sequence fix of D9)"
+        }
+      ],
+      "rollback": "Atomic release, blue/green on petclinic-app01: keep the previous 1.5.2 WAR, the previous oracle-profile build and JDK 8 installed side by side. Rollback = stop the Boot 4.1.1 service, set JAVA_HOME back to JDK 8, start the retained 1.5.2 WAR (ojdbc6 build), re-run the Wave 3 contract tests and UI smoke. DB schema changes from D9 must be additive/backward compatible (e.g. identity defaults or triggers that the 1.5.2 WAR ignores) and ship with a DBA-owned reverse script. Source rollback: git revert of the release merge in petclinic-rest and petclinic-infra. Transit steps T1/T2 are never deployed, so they need no runtime rollback.",
+      "approvers": [
+        "tech-lead",
+        "security",
+        "dba",
+        "platform-ops"
+      ],
+      "risk": "high",
+      "effort": "XL",
+      "evidence": [
+        "B01",
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B06",
+        "B07",
+        "B08",
+        "B09",
+        "B10",
+        "B11",
+        "B12",
+        "B13",
+        "B14",
+        "B27",
+        "R01",
+        "R03",
+        "R04",
+        "R05",
+        "R06",
+        "R08",
+        "R09",
+        "S01",
+        "P10",
+        "P12",
+        "T01"
+      ],
+      "status": "PARTIALLY_PROVEN"
+    },
+    {
+      "wave": 5,
+      "title": "petclinic-angular: Angular 6.1.6 -> 22.2.0 one major at a time, Node 10.10 -> 24.21.0 LTS, Bootstrap 3 -> 5",
+      "component_keys": [
+        "angular",
+        "angular-material",
+        "angular-material-moment-adapter",
+        "angular-http",
+        "bootstrap",
+        "jquery",
+        "moment",
+        "rxjs",
+        "rxjs-compat",
+        "zone-js",
+        "core-js",
+        "tether",
+        "nodejs",
+        "typescript"
+      ],
+      "modules": [
+        "petclinic-angular"
+      ],
+      "depends_on": [
+        3,
+        4
+      ],
+      "targets": [
+        {
+          "component_key": "angular",
+          "from": "6.1.6",
+          "to": "22.2.0"
+        },
+        {
+          "component_key": "angular-material",
+          "from": "dist-tag 'next' -> 7.0.0-beta.0 (pre-release)",
+          "to": "22.2.0 (+ @angular/cdk 22.2.0), pinned"
+        },
+        {
+          "component_key": "angular-material-moment-adapter",
+          "from": "6.4.7",
+          "to": "22.2.0"
+        },
+        {
+          "component_key": "angular-http",
+          "from": "6.1.6",
+          "to": "removed (package discontinued after 7.2.16, not imported in src/)"
+        },
+        {
+          "component_key": "bootstrap",
+          "from": "3.3.7",
+          "to": "5.3.8"
+        },
+        {
+          "component_key": "jquery",
+          "from": "3.3.1",
+          "to": "removed (Bootstrap 5 needs no jQuery; angular.json:28-30 scripts dropped); 4.0.0 only if a remaining consumer is found"
+        },
+        {
+          "component_key": "moment",
+          "from": "2.22.2",
+          "to": "2.31.0 (or a maintained date library - decision D6)"
+        },
+        {
+          "component_key": "rxjs",
+          "from": "6.3.1",
+          "to": "7.8.2"
+        },
+        {
+          "component_key": "rxjs-compat",
+          "from": "6.3.1",
+          "to": "removed (after RxJS 6 import clean-up, before RxJS 7)"
+        },
+        {
+          "component_key": "zone-js",
+          "from": "0.8.26",
+          "to": "0.16.3 (kept: provideZoneChangeDetection() required, R10-R12)"
+        },
+        {
+          "component_key": "core-js",
+          "from": "2.5.7",
+          "to": "removed (not needed by Angular 22)"
+        },
+        {
+          "component_key": "tether",
+          "from": "1.4.4",
+          "to": "removed (only needed by Bootstrap 4 alpha)"
+        },
+        {
+          "component_key": "nodejs",
+          "from": "10.10 (CI, .travis.yml:5)",
+          "to": "24.21.0 LTS"
+        },
+        {
+          "component_key": "typescript",
+          "from": "2.9.2",
+          "to": "6.0.3 (highest allowed by Angular 22.2 compiler-cli: >=6.0 <6.1)"
+        }
+      ],
+      "intermediate_steps": [
+        "ng update one major at a time: 6 -> 7 -> 8 -> 9 -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 -> 16 -> 17 -> 18 -> 19 -> 20 -> 21 -> 22, so each version's automatic migrations run (v19 adds standalone:false; v22 adds ChangeDetectionStrategy.Eager); build + unit tests + UI smoke after every major",
+        "Switch Node per CLI major as the Angular version-compatibility table requires (report: 10 -> 12/14 -> 16/18 -> 20 -> 22.22.3+/24); finish on Node 24.21.0 LTS",
+        "Remove rxjs-compat after the RxJS 6 import clean-up, before moving to RxJS 7",
+        "Drop @angular/http, codelyzer/tslint/protractor/karma 2 when their peer ranges block the next major (B19)",
+        "Migrate the builder to @angular/build:application and TypeScript 6 settings (moduleResolution bundler, no baseUrl)",
+        "Bootstrap 3 -> 5 template migration (btn-default x43, glyphicon x21), remove jQuery/tether/core-js",
+        "Keep Eager change detection + zone.js (provideZoneChangeDetection() in main.ts) - required for a non-empty UI (R10-R12); OnPush/signals is a later, separate decision (D6)",
+        "Deploy after Wave 4 (validated against the Boot 4 + Jackson 2 bridge backend, R12); may be developed in parallel"
+      ],
+      "changes": [
+        {
+          "description": "node-sass 4.9.3 (transitive of @angular-devkit/build-angular ~0.7.0) builds with node-gyp 3.x which requires python2 -> npm ci fails on Node 22 (B15)",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 37,
+          "impact_ref": "IMP-NG-ASIS"
+        },
+        {
+          "description": "webpack 4 MD4 hashing -> \"error:0308010C:digital envelope routines::unsupported\" x24 on Node >= 17 while `ng build` still exits 0 — a false green in CI (B17); builds only with --openssl-legacy-provider (B18)",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 37,
+          "impact_ref": "IMP-NG-ASIS"
+        },
+        {
+          "description": "CI pins Node 10.10 (EOL 2021-04-30)",
+          "file": "spring-petclinic-angular/.travis.yml",
+          "line": 5,
+          "impact_ref": "IMP-NG-ASIS"
+        },
+        {
+          "description": "codelyzer 4.x / tslint / protractor / karma 2 devDependencies have peer ranges < 7/8 -> npm ERESOLVE (B19); remove (TSLint/Protractor deprecated). They also carry most of the 91 dev-scope npm audit findings of the target tree (S02)",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 44,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "@angular/http was removed after 7.2.16 (no 22.x exists); not imported in src/ -> drop dependency",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 21,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Material/CDK on dist-tag \"next\" (pre-release 7.0.0-beta.0 in the lockfile) -> pin 22.2.0 (also line 22)",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 16,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "rxjs-compat is incompatible with RxJS 7 -> remove after fixing deep imports",
+          "file": "spring-petclinic-angular/package.json",
+          "line": 32,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Build option \"extractCss\" removed -> \"Schema validation failed ... Unknown option extractCss\" (B21)",
+          "file": "spring-petclinic-angular/angular.json",
+          "line": 38,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "@angular-devkit/build-angular:browser (webpack) builder is deprecated in v22 (B22 warning) -> migrate to @angular/build:application",
+          "file": "spring-petclinic-angular/angular.json",
+          "line": 12,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "\"defaultProject\" workspace option removed (\"Workspace extension with invalid name (defaultProject) found\", B21)",
+          "file": "spring-petclinic-angular/angular.json",
+          "line": 132,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "TypeScript 6: baseUrl deprecated (TS5101, B22) — also src/tsconfig.app.json:6; imports relying on it break once removed (vet-add.component.ts:25)",
+          "file": "spring-petclinic-angular/tsconfig.json",
+          "line": 5,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "TypeScript 6: moduleResolution \"node\" (node10) deprecated (TS5107) and cannot resolve Angular 22 package exports -> 23 x TS2307 e.g. \"Cannot find module '@angular/common/http'\" (B22); use \"bundler\"",
+          "file": "spring-petclinic-angular/tsconfig.json",
+          "line": 8,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "TypeScript 6 strict defaults -> 31 x TS2564 \"Property ... has no initializer\" (B22), e.g. errorMessage here",
+          "file": "spring-petclinic-angular/src/app/visits/visit-list/visit-list.component.ts",
+          "line": 38,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Components are standalone by default (Angular 19+) -> NG6008 \"Component OwnerListComponent is standalone, and cannot be declared in an NgModule\" (15-19 x, B22/B23); add standalone:false or convert",
+          "file": "spring-petclinic-angular/src/app/owners/owners.module.ts",
+          "line": 42,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "RxJS 7: side-effect import 'rxjs/Rx' removed -> TS2882 (also owner-detail.component.ts:27, owner-edit.component.ts:27)",
+          "file": "spring-petclinic-angular/src/app/owners/owner-list/owner-list.component.ts",
+          "line": 26,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "RxJS 7: deep import 'rxjs/internal/operators' -> TS2307 (also specialty.service.ts:27, vet.service.ts:29, visit.service.ts:29)",
+          "file": "spring-petclinic-angular/src/app/pettypes/pettype.service.ts",
+          "line": 28,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "RxJS 7: 'rxjs/Observable' / 'rxjs/BehaviorSubject' paths removed (also vet-resolver.ts:21, testing/router-stubs.ts:54)",
+          "file": "spring-petclinic-angular/src/app/specialties/spec-resolver.ts",
+          "line": 23,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "RxJS 7: static Observable.throwError removed -> TS2339 (B23); use throwError(() => ...)",
+          "file": "spring-petclinic-angular/src/app/error.service.ts",
+          "line": 65,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Angular Material root entry point removed: import {MatDatepickerModule} from '@angular/material' -> TS2305 (also visits.module.ts:33); use '@angular/material/datepicker'",
+          "file": "spring-petclinic-angular/src/app/pets/pets.module.ts",
+          "line": 34,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "`import * as moment from 'moment'` then moment(...) -> TS2349 'This expression is not callable' (call at :73; also pet-edit.component.ts:74, visit-add.component.ts:74, visit-edit.component.ts:71)",
+          "file": "spring-petclinic-angular/src/app/pets/pet-add/pet-add.component.ts",
+          "line": 33,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Triple-slash reference to node_modules/@angular/router/src/interfaces.d.ts (file no longer exists) -> TS6053",
+          "file": "spring-petclinic-angular/src/app/vets/vet-resolver.ts",
+          "line": 1,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "zone.js 0.16: 'zone.js/dist/zone' removed -> TS2882; import 'zone.js'. core-js/es7/reflect (:46) no longer needed",
+          "file": "spring-petclinic-angular/src/polyfills.ts",
+          "line": 73,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Angular 21+/22: bootstrapModule() is zoneless unless provideZoneChangeDetection() is supplied as applicationProviders — the app builds but async subscribe() results are never rendered (R10/R11)",
+          "file": "spring-petclinic-angular/src/main.ts",
+          "line": 30,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Angular 22: components without changeDetection default to OnPush; mutable-field components like this one (owners assigned inside subscribe) render nothing (R10); add changeDetection: ChangeDetectionStrategy.Eager to all 24 @Component classes (what `ng update` to v22 would add) (R12)",
+          "file": "spring-petclinic-angular/src/app/owners/owner-list/owner-list.component.ts",
+          "line": 43,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "Bootstrap 3 -> 5 (CVE-2024-6485 has no 3.x fix): templates use BS3-only classes (btn-default x43, glyphicon x21); jQuery/tether scripts (angular.json:28-30) become unnecessary",
+          "file": "spring-petclinic-angular/angular.json",
+          "line": 24,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "REST date contract: the UI formats dates as \"YYYY/MM/DD\" (also pets.module.ts:39 dateInput) — depends on the backend keeping the Jackson 2 custom format (R09 vs R13)",
+          "file": "spring-petclinic-angular/src/app/pets/pet-add/pet-add.component.ts",
+          "line": 73,
+          "impact_ref": "IMP-NG-22"
+        },
+        {
+          "description": "CI: after the per-major ng update chain, pin Node 24.21.0 LTS and build with `ng build --configuration production`; add the UI smoke test (Wave 3) as a required CI step",
+          "file": "spring-petclinic-angular/.travis.yml",
+          "line": 24,
+          "impact_ref": "IMP-NG-22"
+        }
+      ],
+      "entry_gates": [
+        {
+          "check": "Wave 4 released (backend Boot 4.1.1 + Jackson 2 bridge in production)",
+          "how": "Wave 4 exit gates signed off",
+          "pass_criterion": "All Wave 4 exit gates PASS"
+        },
+        {
+          "check": "UI smoke harness available (Wave 3)",
+          "how": "npx playwright test e2e/smoke on the Angular 6 bundle",
+          "pass_criterion": "PASS"
+        },
+        {
+          "check": "Decisions D6 and D7 approved",
+          "how": "Decision log",
+          "pass_criterion": "Approved by tech-lead (+ security for D7)"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "Clean install on the target Node",
+          "how": "node --version && npm ci  (no --legacy-peer-deps)",
+          "pass_criterion": "v24.21.0; exit 0; 0 ERESOLVE (B19 currently FAILS)"
+        },
+        {
+          "check": "Production build with no hidden errors",
+          "how": "npx ng build --configuration production 2>&1 | tee ng-build.log; grep -ciE 'error' ng-build.log",
+          "pass_criterion": "exit 0 AND 0 error lines (guards against the false green of B17)"
+        },
+        {
+          "check": "Unit tests",
+          "how": "npx ng test --watch=false",
+          "pass_criterion": "All specs pass, 0 failures (28 spec files / 32 it() blocks in the current tree; count must not drop without tech-lead approval)"
+        },
+        {
+          "check": "UI smoke against Boot 4.1.1 + Jackson 2 bridge (mandatory - a green build shipped an empty UI in R10)",
+          "how": "npx playwright test e2e/smoke",
+          "pass_criterion": "owner rows == GET /owners count; owner 1 page shows '2010/09/07' (R12)"
+        },
+        {
+          "check": "Legacy code gone",
+          "how": "grep -rcE \"rxjs/Rx'|rxjs/internal|zone.js/dist|glyphicon|btn-default|@angular/http\" src | awk -F: '{s+=$2} END {print s}'",
+          "pass_criterion": "0"
+        },
+        {
+          "check": "CVE count for the wave's components = 0",
+          "how": "npm audit --omit=dev ; npm audit",
+          "pass_criterion": "'found 0 vulnerabilities' for both (S02: 94 total / 3 prod today); also closes the 113 build-toolchain npm components of the report that belong to the Angular 6 tree"
+        }
+      ],
+      "rollback": "Static bundle: keep the previous Angular 6 dist/ artifact on the web server and switch the document root/symlink back. The Boot 4.1.1 + Jackson 2 bridge backend serves both front-ends (R09 and R12), so no backend rollback is needed. Source: git revert of the upgrade merge.",
+      "approvers": [
+        "tech-lead",
+        "security"
+      ],
+      "risk": "high",
+      "effort": "XL",
+      "evidence": [
+        "B15",
+        "B16",
+        "B17",
+        "B18",
+        "B19",
+        "B20",
+        "B21",
+        "B22",
+        "B23",
+        "B28",
+        "B30",
+        "R09",
+        "R10",
+        "R11",
+        "R12",
+        "R13",
+        "S02"
+      ],
+      "status": "PARTIALLY_PROVEN"
+    },
+    {
+      "wave": 6,
+      "title": "petclinic-rest: port custom (de)serializers to Jackson 3 and drop the deprecated spring-boot-jackson2 bridge",
+      "component_keys": [
+        "jackson-databind"
+      ],
+      "modules": [
+        "petclinic-rest"
+      ],
+      "depends_on": [
+        4,
+        5
+      ],
+      "targets": [
+        {
+          "component_key": "jackson-databind",
+          "from": "2.8.7 (scan); Boot-managed Jackson 2 via spring-boot-jackson2 after Wave 4",
+          "to": "tools.jackson.core:jackson-databind 3.x as managed by Boot 4.1.1 (3.1.5 per report) or 3.2.3 (decision D3)"
+        }
+      ],
+      "intermediate_steps": [
+        "Port the 6 custom (de)serializers to tools.jackson and switch the model annotations",
+        "Remove spring-boot-jackson2 and spring.http.converters.preferred-json-mapper",
+        "Re-run contract tests, UI smoke (Angular 22) and the ops script against the result"
+      ],
+      "changes": [
+        {
+          "description": "Port JacksonCustomOwnerSerializer from the Jackson 2 StdSerializer to tools.jackson (same for JacksonCustomPetSerializer.java:37, JacksonCustomVisitSerializer.java:37, JacksonCustomOwnerDeserializer.java:34, JacksonCustomPetDeserializer.java:40, JacksonCustomVisitDeserializer.java:39)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/rest/JacksonCustomOwnerSerializer.java",
+          "line": 37,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "@JsonSerialize/@JsonDeserialize -> tools.jackson.databind.annotation (also Pet.java:55-56, Visit.java:44-45)",
+          "file": "spring-petclinic-rest/src/main/java/org/springframework/samples/petclinic/model/Owner.java",
+          "line": 53,
+          "impact_ref": "IMP-REST-BOOT4"
+        },
+        {
+          "description": "Remove the explicit com.fasterxml.jackson.core jackson-core/jackson-databind dependencies (pom.xml:111-118) and spring-boot-jackson2",
+          "file": "spring-petclinic-rest/pom.xml",
+          "line": 111,
+          "impact_ref": "NEW"
+        },
+        {
+          "description": "Remove spring.http.converters.preferred-json-mapper=jackson2 added in Wave 4",
+          "file": "spring-petclinic-rest/src/main/resources/application.properties",
+          "line": 37,
+          "impact_ref": "IMP-REST-BOOT4"
+        }
+      ],
+      "entry_gates": [
+        {
+          "check": "Waves 4 and 5 released",
+          "how": "Exit gates of Waves 4 and 5 signed off",
+          "pass_criterion": "All PASS"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "Build + tests",
+          "how": "JAVA_HOME=<Temurin 25.0.4.1> ./mvnw -B clean verify",
+          "pass_criterion": "BUILD SUCCESS; Tests run: 169, Failures: 0, Errors: 0"
+        },
+        {
+          "check": "REST contract unchanged without the bridge",
+          "how": "./mvnw -B -Dtest=RestContractTests test",
+          "pass_criterion": "7/7 GETs JSON-identical to the frozen snapshot; birthDate 'yyyy/MM/dd'; no 'nesting depth (501)' error (R04 failure mode)"
+        },
+        {
+          "check": "UI and ops consumers",
+          "how": "npx playwright test e2e/smoke (Angular 22) ; evidence/w2_gate_tests.py api ...",
+          "pass_criterion": "Both PASS (R12 criteria; R08 counts)"
+        },
+        {
+          "check": "Bridge removed",
+          "how": "./mvnw -B dependency:tree | grep -c spring-boot-jackson2",
+          "pass_criterion": "0 (com.fasterxml jackson may remain only as a transitive of third-party libraries - UNVERIFIED which)"
+        },
+        {
+          "check": "CVE count for the wave's components = 0",
+          "how": "python3 tools/osv_maven.py target/deps.txt --scope test",
+          "pass_criterion": "'OSV advisories: 0'"
+        }
+      ],
+      "rollback": "Redeploy the Wave 4 WAR (Jackson 2 bridge) - contract-identical for both front-end versions (R05, R09, R12); git revert of the port.",
+      "approvers": [
+        "tech-lead",
+        "security"
+      ],
+      "risk": "medium",
+      "effort": "M",
+      "evidence": [],
+      "status": "UNPROVEN"
+    },
+    {
+      "wave": 7,
+      "title": "Platform: Oracle Linux 7.6 -> 9/10 on petclinic-db01 (dedicated window; 26ai evaluated separately)",
+      "component_keys": [
+        "oracle-linux"
+      ],
+      "modules": [
+        "petclinic-infra"
+      ],
+      "depends_on": [
+        1
+      ],
+      "targets": [
+        {
+          "component_key": "oracle-linux",
+          "from": "7.6 (Extended Support only; db-inventory.yaml:9)",
+          "to": "Oracle Linux 9 or 10 (target minor release and Oracle DB 19c certification UNVERIFIED - MOS/ULN login required)"
+        }
+      ],
+      "intermediate_steps": [
+        "Decision D8: fund OL7 Extended Support until migration, or schedule OL9/OL10",
+        "Build a new host on OL9/OL10 with Oracle 19c at the Wave 1 patch level (or newer), certification checked on MOS (UNVERIFIED)",
+        "Move the database by RMAN duplicate or Data Guard standby + switchover (no in-place OS upgrade)",
+        "Post-deployment record (not a code change): DBA updates petclinic-infra/oracle/db-inventory.yaml:9"
+      ],
+      "changes": [],
+      "entry_gates": [
+        {
+          "check": "Decision D8 approved",
+          "how": "Decision log",
+          "pass_criterion": "Approved by platform-ops + dba + security"
+        },
+        {
+          "check": "Certification",
+          "how": "MOS certification matrix: Oracle Database 19c at the Wave 1 RU on the chosen OL release",
+          "pass_criterion": "Certified (UNVERIFIED today)"
+        },
+        {
+          "check": "Wave 1 closed",
+          "how": "Wave 1 exit gates signed off",
+          "pass_criterion": "All PASS"
+        }
+      ],
+      "exit_gates": [
+        {
+          "check": "OS release",
+          "how": "cat /etc/os-release on the new petclinic-db01",
+          "pass_criterion": "VERSION_ID 9.x or 10.x"
+        },
+        {
+          "check": "Database gates",
+          "how": "Repeat the Wave 1 exit gates (dba_registry_sqlpatch, version_full, INVALID count, dba_registry)",
+          "pass_criterion": "Same results as after Wave 1"
+        },
+        {
+          "check": "Application regression",
+          "how": "Wave 3 contract tests + UI smoke + ops/healthcheck.py against the new host",
+          "pass_criterion": "All PASS, healthcheck exit 0"
+        }
+      ],
+      "rollback": "Data Guard switchover back to the retained OL7.6 primary (or keep the old host untouched until the new one passes all gates); DNS/service name switched back.",
+      "approvers": [
+        "dba",
+        "platform-ops",
+        "security"
+      ],
+      "risk": "high",
+      "effort": "L",
+      "evidence": [
+        "X01"
+      ],
+      "status": "NOT_PROVABLE_IN_SANDBOX"
+    }
+  ],
+  "coverage": {
+    "outdated_production_component_keys": [
+      "oracle-database",
+      "oracle-ojvm",
+      "oracle-linux",
+      "python",
+      "requests",
+      "urllib3",
+      "pyyaml",
+      "cx-oracle",
+      "jinja2",
+      "ojdbc",
+      "hibernate-oracle-dialect",
+      "jdk",
+      "spring-boot",
+      "spring-framework",
+      "spring-security",
+      "spring-data-jpa",
+      "spring-data-commons",
+      "spring-retry",
+      "spring-data-jdbc-ext",
+      "apache-tomcat",
+      "jackson-databind",
+      "jackson-core",
+      "hibernate-orm",
+      "hibernate-validator",
+      "dom4j",
+      "logback",
+      "snakeyaml",
+      "springfox",
+      "guava",
+      "hsqldb",
+      "mysql-connector-j",
+      "postgresql-jdbc",
+      "jaxb-api",
+      "aspectj",
+      "angular",
+      "angular-material",
+      "angular-material-moment-adapter",
+      "angular-http",
+      "bootstrap",
+      "jquery",
+      "moment",
+      "rxjs",
+      "rxjs-compat",
+      "zone-js",
+      "core-js",
+      "tether"
+    ],
+    "uncovered": [],
+    "deferred": []
+  },
+  "blocking_decisions": [
+    {
+      "decision": "D1 - Java target: approve Java 25 LTS (Temurin 25.0.4.1) rather than 17 (Oracle Java 17 Premier Support ended Sep 2026), shipped in the same release as Spring Boot 4.1.1.",
+      "owner": "tech-lead + security",
+      "blocks_waves": [
+        4
+      ],
+      "recommendation": "Approve Java 25 LTS (Temurin 25.0.4.1): proven build/run in B14; Java 17 Premier Support has ended per the report."
+    },
+    {
+      "decision": "D2 - Spring Boot path: approve 1.5.2 -> 2.7.18 -> 3.5.16 -> 4.1.1 with 2.7/3.5 as non-deployed transit steps (both out of OSS support).",
+      "owner": "tech-lead",
+      "blocks_waves": [
+        4
+      ],
+      "recommendation": "Approve 1.5.2 -> 2.7.18 -> 3.5.16 -> 4.1.1 with 2.7/3.5 as build-and-test-only transit gates (T1/T2), never deployed."
+    },
+    {
+      "decision": "D3 - Version overrides: pin Tomcat 11.0.26 over the Boot-managed 11.0.24 (mandatory, 3 CRITICAL CVEs); decide whether to also override Hibernate 7.4.5 -> 7.4.10, Hibernate Validator 9.1.3 -> 9.1.4, Jackson 2.21.5/3.1.5 -> 2.22.3/3.2.3, Logback 1.5.38 -> 1.6.3.",
+      "owner": "tech-lead + security",
+      "blocks_waves": [
+        4,
+        6
+      ],
+      "recommendation": "Mandatory: <tomcat.version>11.0.26</tomcat.version>. Other overrides only if the Wave 4/6 OSV gate reports a finding; otherwise stay on Boot-managed versions to reduce drift."
+    },
+    {
+      "decision": "D4 - Accept the deprecated spring-boot-jackson2 bridge as a temporary measure (proven contract-identical for Angular and ops) until serializers are ported to Jackson 3.",
+      "owner": "tech-lead + security",
+      "blocks_waves": [
+        4
+      ],
+      "recommendation": "Accept the bridge for Wave 4 only (R05/R09 contract-identical); Wave 6 removes it. Also accept the documented Content-Type change application/json;charset=UTF-8 -> application/json (R05)."
+    },
+    {
+      "decision": "D5 - Oracle DB patch window for RU 19.32 + OJVM + Aug/Sep 2026 CSPU (OJVM/datapatch downtime) ahead of the next quarterly Oracle CPU; stay on 19c LTR vs plan 26ai. (report decisions_needed[4]; vendor date reference omitted so that the plan sets no migration date)",
+      "owner": "dba + security",
+      "blocks_waves": [
+        1
+      ],
+      "recommendation": "Approve the OJVM-capable downtime window for Wave 1 as the first action (5 CRITICAL DB CVEs); stay on 19c LTR now, evaluate 26ai separately."
+    },
+    {
+      "decision": "D6 - Angular: incremental ng update through 16 majors vs re-scaffold on Angular 22; keep Eager change detection + zone.js initially (required, R10-R12) vs invest in OnPush/signals; accept Bootstrap 3 -> 5 visual changes and a moment.js replacement.",
+      "owner": "tech-lead",
+      "blocks_waves": [
+        5
+      ],
+      "recommendation": "Incremental ng update per major (runs the official migrations), keep Eager CD + zone.js initially (R10-R12), accept Bootstrap 5 visual changes; moment 2.31.0 now, replacement later."
+    },
+    {
+      "decision": "D7 - Make a UI smoke test a release gate for the front-end upgrade (a green `ng build` shipped an empty UI in R10).",
+      "owner": "tech-lead + security",
+      "blocks_waves": [
+        3,
+        5
+      ],
+      "recommendation": "Yes - UI smoke is a required gate from Wave 3 on (R10: green ng build, empty UI)."
+    },
+    {
+      "decision": "D8 - Oracle Linux 7.6: fund Extended Support until the OS migration, or schedule OL9/OL10.",
+      "owner": "platform-ops + dba",
+      "blocks_waves": [
+        7
+      ],
+      "recommendation": "Fund Extended Support as a bridge and schedule OL9/OL10 via a new host (Wave 7)."
+    },
+    {
+      "decision": "D9 (NEW, from IMP-INFRA-JDBC) - Oracle profile: how spring.datasource.url reaches Spring in production (Maven <properties> are not used at runtime), and how to reconcile GenerationType.IDENTITY with the sequence-only Oracle DDL and the missing users/roles tables (all UNVERIFIED at runtime)",
+      "owner": "dba + tech-lead",
+      "blocks_waves": [
+        4
+      ],
+      "recommendation": "Inject the URL via environment/application-oracle.properties; add identity columns (or triggers) with an additive DBA script tested on the staging copy; add users/roles tables only if basic auth will be enabled."
+    },
+    {
+      "decision": "D10 (NEW) - Interim security patch of the app-server JDK 8u161 -> Temurin 8u504 before Wave 4 (the report lists 8u504 as fixing all 32 jdk CVEs)",
+      "owner": "security + platform-ops",
+      "blocks_waves": [],
+      "recommendation": "Recommended as an optional interim measure: the current code builds and passes 169/169 tests on 8u504 (P10) and serves the REST API (P11). The jdk component itself is covered by Wave 4 (Java 25)."
+    },
+    {
+      "decision": "D11 (NEW) - ops/healthcheck.yaml:5 contains the literal '${ORACLE_RO_PASSWORD}'; neither the current nor the upgraded script expands environment variables, so the production substitution mechanism must be confirmed before W2-G9",
+      "owner": "platform-ops",
+      "blocks_waves": [
+        2
+      ],
+      "recommendation": "Document the mechanism (e.g. templating at deploy time); if none exists, add explicit os.environ expansion in a follow-up change reviewed by security (not part of wave-2.patch)."
+    }
+  ],
+  "proof": {
+    "wave": 2,
+    "patch_file": "wave-2.patch",
+    "base_refs": {
+      "spring-petclinic-rest": "v1.5.2 (6479aaa4b3b47b646e3f4c7d6f4fa293ebd2791d) - unchanged by wave 2",
+      "spring-petclinic-angular": "22935fc04933e4dec3b20bcfb8720f56b09f170d - unchanged by wave 2",
+      "petclinic-infra": "petclinic-infra.tar.gz sha256 1832fad909c689004d12c865bb59009d57fc43faf3bf18460b24f4bdf94c48c5 (patch paths relative to petclinic-infra/)",
+      "impact-report.json": "sha256 415dfc78cee094dbb3814a89cfc6f40b2aec85c4426a0552ac489ee4b3f53121"
+    },
+    "steps": [
+      {
+        "id": "P00",
+        "command": "[Pin inputs: verify refs of the cloned repos and checksum of the infra tarball] git -C spring-petclinic-rest describe --tags; git -C spring-petclinic-rest rev-parse HEAD; git -C spring-petclinic-rest status --porcelain | wc -l; git -C spring-petclinic-angular rev-parse HEAD; git -C spring-petclinic-angular status --porcelain | wc -l; sha256sum /mnt/session/uploads/petclinic-infra.tar.gz /mnt/session/uploads/impact-report.json; tar tzf /mnt/session/uploads/petclinic-infra.tar.gz 2>/dev/null; find petclinic-infra -type f -exec sha256sum {} \\; | sort -k2",
+        "result": "PASS",
+        "output_excerpt": "v1.5.2\n6479aaa4b3b47b646e3f4c7d6f4fa293ebd2791d\n22935fc04933e4dec3b20bcfb8720f56b09f170d\n1832fad909c689004d12c865bb59009d57fc43faf3bf18460b24f4bdf94c48c5  /mnt/session/uploads/petclinic-infra.tar.gz\n415dfc78cee094dbb3814a89cfc6f40b2aec85c4426a0552ac489ee4b3f53121  /mnt/session/uploads/impact-report.json\n# ----- exit code: 0 -----\n(full log: evidence/P00.log)"
+      },
+      {
+        "id": "P01",
+        "command": "[Create throwaway copy of pinned petclinic-infra and record a baseline commit (sandbox only, never pushed)] rm -rf /work/proof/petclinic-infra && tar --no-same-owner -xzf /mnt/session/uploads/petclinic-infra.tar.gz -C /work/proof 2>/dev/null; cd /work/proof/petclinic-infra && git init -q && git -c user.name=proof -c user.email=proof@sandbox.invalid add -A && git -c user.name=proof -c user.email=proof@sandbox.invalid commit -q -m \"baseline: petclinic-infra.tar.gz sha256 1832fad9\" && git log --oneline && git ls-files && git remote -v | wc -l",
+        "result": "PASS",
+        "output_excerpt": "d514984 baseline: petclinic-infra.tar.gz sha256 1832fad9\n# ----- exit code: 0 -----\n(full log: evidence/P01.log)"
+      },
+      {
+        "id": "P02",
+        "command": "[Install CPython 3.14.7 (target runtime of Wave 2)] python3 -m uv python install 3.14.7 && python3 -m uv python find 3.14.7 && $(python3 -m uv python find 3.14.7) --version",
+        "result": "PASS",
+        "output_excerpt": "Downloading cpython-3.14.7-linux-x86_64-gnu (download) (34.3MiB)\n Downloaded cpython-3.14.7-linux-x86_64-gnu (download)\nInstalled Python 3.14.7 in 1.44s\n + cpython-3.14.7-linux-x86_64-gnu (python3.14)\n/root/.local/share/uv/python/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14\nPython 3.14.7\n# ----- exit code: 0 -----\n(full log: evidence/P02.log)"
+      },
+      {
+        "id": "P03",
+        "command": "[Negative control (entry evidence): pinned AS-IS requirements (baseline commit) on CPython 3.14.7 must FAIL to install (reproduces B24); step passes when the install fails] git show HEAD:ops/requirements.txt > /tmp/asis-req.txt; cat /tmp/asis-req.txt; PY=$(python3 -m uv python find 3.14.7); rm -rf /tmp/venv-asis && $PY -m venv /tmp/venv-asis && /tmp/venv-asis/bin/python -m pip install --disable-pip-version-check -r /tmp/asis-req.txt > /tmp/asis-install.log 2>&1; rc=$?; grep -E \"longintrepr|Failed building wheel|failed-wheel\" /tmp/asis-install.log | head -5; echo \"as-is install rc=$rc (non-zero expected)\"; [ $rc -ne 0 ]",
+        "result": "PASS",
+        "output_excerpt": "      ext/_yaml.c:49:12: fatal error: longintrepr.h: No such file or directory\n         49 |   #include \"longintrepr.h\"\n  ERROR: Failed building wheel for PyYAML\nas-is install rc=1 (non-zero expected)\n# ----- exit code: 0 -----\n(full log: evidence/P03.log)"
+      },
+      {
+        "id": "P04",
+        "command": "[Wave 2 change set applied to the throwaway copy (git diff of the working tree vs baseline)] git status --short && git diff --stat && git diff",
+        "result": "PASS",
+        "output_excerpt": " M ops/healthcheck.py\n M ops/requirements.txt\n M ops/runtime.txt\n 3 files changed, 11 insertions(+), 11 deletions(-)\n# ----- exit code: 0 -----\n(full log: evidence/P04.log)"
+      },
+      {
+        "id": "P05",
+        "command": "[Exit gate W2-G1: clean venv on CPython 3.14.7, pip install -r ops/requirements.txt exits 0] PY=$(python3 -m uv python find 3.14.7); rm -rf /tmp/venv-w2 && $PY -m venv /tmp/venv-w2 && /tmp/venv-w2/bin/python --version && /tmp/venv-w2/bin/python -m pip install --disable-pip-version-check -r ops/requirements.txt 2>&1 | tail -4; exit ${PIPESTATUS[0]}",
+        "result": "PASS",
+        "output_excerpt": "Python 3.14.7\nSuccessfully installed Jinja2-3.1.6 MarkupSafe-3.0.3 PyYAML-6.0.3 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.1 cryptography-50.0.1 idna-3.20 oracledb-26.0.1 pycparser-3.0 requests-2.34.2 typing_extensions-4.16.0 urllib3-2.8.0\n# ----- exit code: 0 -----\n(full log: evidence/P05.log)"
+      },
+      {
+        "id": "P06",
+        "command": "[Exit gates W2-G2..G5 (offline): exact pins, import on 3.14.7, safe_load, collections.abc, keyword connect, template render, Thin mode] /tmp/venv-w2/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py offline",
+        "result": "PASS",
+        "output_excerpt": "PASS rest_api_url unchanged (REST contract): http://petclinic-app01:9966/petclinic/api/\nPASS load_config rejects !!python tags\nPASS oracledb.connect keyword-only: {'user': 'petclinic_ro', 'password': 'x', 'dsn': 'petclinic-db01:1521/PETCLINIC'}\nSUMMARY: 0 failed check(s)\n# ----- exit code: 0 -----\n(full log: evidence/P06.log)"
+      },
+      {
+        "id": "P07",
+        "command": "[Exit gate W2-G6: python-oracledb Thin mode reaches the network without an Oracle Client (no DB in sandbox, X01) - closed local port] echo \"Oracle Client libs on host (libclntsh count): $(ldconfig -p | grep -c libclntsh || true)\"; /tmp/venv-w2/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py thin 127.0.0.1:1/PETCLINIC",
+        "result": "PASS",
+        "output_excerpt": "Oracle Client libs on host (libclntsh count): 0\noracledb error: DPY-6005: cannot connect to database (CONNECTION_ID=2T3icChIO8ju1RDjfPChGA==).\nPASS thin mode used (no DPI-1047 Oracle Client error)\nPASS reached the network layer (DPY-6005)\nSUMMARY: 0 failed check(s)\n# ----- exit code: 0 -----\n(full log: evidence/P07.log)"
+      },
+      {
+        "id": "P08",
+        "command": "[Exit gate W2-G7: known-vulnerability count for the Wave 2 components (pins + full resolved transitive set) = 0 (pip-audit, OSV service)] pip-audit --version; echo \"== pinned requirements (OSV) ==\"; pip-audit --vulnerability-service osv -r ops/requirements.txt --progress-spinner off; r1=$?; echo \"== full installed venv incl. transitive deps (OSV) ==\"; pip-audit --vulnerability-service osv --path /tmp/venv-w2/lib/python3.14/site-packages --progress-spinner off; r2=$?; echo \"rc_requirements=$r1 rc_env=$r2\"; exit $((r1+r2))",
+        "result": "PASS",
+        "output_excerpt": "pip-audit 2.10.1\n== pinned requirements (OSV) ==\nNo known vulnerabilities found\n== full installed venv incl. transitive deps (OSV) ==\nNo known vulnerabilities found\nrc_requirements=0 rc_env=0\n# ----- exit code: 0 -----\n(full log: evidence/P08.log)"
+      },
+      {
+        "id": "P09",
+        "command": "[Negative control for W2-G7: the as-is pins (baseline commit) DO report known vulnerabilities, so the gate discriminates] git show HEAD:ops/requirements.txt > /tmp/asis-requirements.txt; cat /tmp/asis-requirements.txt; pip-audit --vulnerability-service osv -r /tmp/asis-requirements.txt --no-deps --disable-pip --progress-spinner off; rc=$?; echo \"rc=$rc (non-zero expected)\"; [ $rc -ne 0 ]",
+        "result": "PASS",
+        "output_excerpt": "pyyaml   3.12    PYSEC-2021-142  5.4\npyyaml   3.12    PYSEC-2021-142  5.4\nrc=1 (non-zero expected)\n# ----- exit code: 0 -----\n(full log: evidence/P09.log)"
+      },
+      {
+        "id": "P10",
+        "command": "[Baseline of the as-is backend (v1.5.2) with its own toolchain: Maven Wrapper (3.3.3) on JDK 8 (Temurin 8u504, sandbox CA bundle imported into cacerts), full test suite - measures the test count used in later gates] ./mvnw -B -V clean package 2>&1 | grep -vE \"Download(ing|ed)\" ; exit ${PIPESTATUS[0]}",
+        "result": "PASS",
+        "output_excerpt": "Apache Maven 3.3.3 (7994120775791599e205a5524ec3e0dfe41d4a06; 2015-04-22T11:57:37+00:00)\nJava version: 1.8.0_504, vendor: Temurin\nTests run: 169, Failures: 0, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS\n# ----- exit code: 0 -----\n(full log: evidence/P10.log)"
+      },
+      {
+        "id": "P11",
+        "command": "[Exit gate W2-G8 (REST contract, cf. R08): healthcheck.api_counts() on CPython 3.14.7 + requests 2.34.2 against the CURRENT backend v1.5.2 WAR running on JDK 8u504 at the production URL shape http://<host>:9966/petclinic/api/ - expect owners=10, vets=6] grep -E \"Tomcat started|Started PetClinic\" /tmp/rest-asis-run.log; /tmp/venv-w2/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py api http://localhost:9966/petclinic/api/ 10 6",
+        "result": "PASS",
+        "output_excerpt": "INFO  TomcatEmbeddedServletContainer - Tomcat started on port(s): 9966 (http)\nINFO  PetClinicApplication - Started PetClinicApplication in 6.43 seconds (JVM running for 6.887)\napi_counts = {'owners': 10, 'vets': 6}\nPASS api_counts owners: 10\nPASS api_counts vets: 6\nSUMMARY: 0 failed check(s)\n# ----- exit code: 0 -----\n(full log: evidence/P11.log)"
+      },
+      {
+        "id": "P12",
+        "command": "[Supporting (Wave 3 input): capture the as-is REST contract of v1.5.2 on JDK 8 - 7 GETs, status, Content-Type, body sha256] for p in owners owners/1 pets vets visits pettypes specialties; do f=$(echo $p | tr / _).json; code=$(curl -s -o $f -w \"%{http_code} %{content_type}\" http://localhost:9966/petclinic/api/$p); echo \"GET /petclinic/api/$p -> $code bytes=$(wc -c <$f) sha256=$(sha256sum $f | cut -c1-16)\"; done; python3 -c \"import json;d=json.load(open(\\\"owners_1.json\\\"));print(\\\"owner1:\\\",d[\\\"firstName\\\"],d[\\\"lastName\\\"],\\\"pet0 birthDate:\\\",d[\\\"pets\\\"][0][\\\"birthDate\\\"])\"",
+        "result": "PASS",
+        "output_excerpt": "GET /petclinic/api/owners/1 -> 200 application/json;charset=UTF-8 bytes=231 sha256=c0cd5594b8190d14\nGET /petclinic/api/pets -> 200 application/json;charset=UTF-8 bytes=3142 sha256=38589ec9438f856d\nGET /petclinic/api/vets -> 200 application/json;charset=UTF-8 bytes=533 sha256=41a8320850582aef\nGET /petclinic/api/visits -> 200 application/json;charset=UTF-8 bytes=1063 sha256=3bc12f2009254012\nGET /petclinic/api/pettypes -> 200 application/json;charset=UTF-8 bytes=143 sha256=3af6042b82e30c93\nGET /petclinic/api/specialties -> 200 application/json;charset=UTF-8 bytes=83 sha256=867efd8c74127856\nowner1: George Franklin pet0 birthDate: 2010/09/07\n# ----- exit code: 0 -----\n(full log: evidence/P12.log)"
+      },
+      {
+        "id": "P13",
+        "command": "[Patch applicability: wave-2.patch passes git apply --check on a FRESH extraction of the pinned petclinic-infra.tar.gz (inside the dir and from the parent dir with --directory), applies, and the result is byte-identical to the proven tree] rm -rf /tmp/fresh /tmp/fresh2 && mkdir /tmp/fresh /tmp/fresh2 && tar --no-same-owner -xzf /mnt/session/uploads/petclinic-infra.tar.gz -C /tmp/fresh 2>/dev/null; tar --no-same-owner -xzf /mnt/session/uploads/petclinic-infra.tar.gz -C /tmp/fresh2 2>/dev/null; sha256sum /mnt/session/outputs/wave-2.patch; (cd /tmp/fresh2 && git apply --directory=petclinic-infra --check -v /mnt/session/outputs/wave-2.patch) && cd /tmp/fresh/petclinic-infra && git apply --check -v /mnt/session/outputs/wave-2.patch && git apply /mnt/session/outputs/wave-2.patch && diff -r --exclude=.git --exclude=__pycache__ /tmp/fresh/petclinic-infra /work/proof/petclinic-infra && echo \"IDENTICAL to proven tree (excluding .git and __pycache__)\"",
+        "result": "PASS",
+        "output_excerpt": "Checking patch petclinic-infra/ops/healthcheck.py...\nChecking patch petclinic-infra/ops/requirements.txt...\nChecking patch petclinic-infra/ops/runtime.txt...\nChecking patch ops/healthcheck.py...\nChecking patch ops/requirements.txt...\nChecking patch ops/runtime.txt...\nIDENTICAL to proven tree (excluding .git and __pycache__)\n# ----- exit code: 0 -----\n(full log: evidence/P13.log)"
+      },
+      {
+        "id": "P14",
+        "command": "[Rollback rehearsal: git apply -R restores the pinned baseline byte-for-byte] cd /tmp/fresh/petclinic-infra && git apply -R --check /mnt/session/outputs/wave-2.patch && git apply -R /mnt/session/outputs/wave-2.patch && rm -rf /tmp/pristine && mkdir -p /tmp/pristine && tar --no-same-owner -xzf /mnt/session/uploads/petclinic-infra.tar.gz -C /tmp/pristine 2>/dev/null && diff -r /tmp/fresh/petclinic-infra /tmp/pristine/petclinic-infra && echo \"ROLLED BACK: identical to pinned baseline\"",
+        "result": "PASS",
+        "output_excerpt": "ROLLED BACK: identical to pinned baseline\n# ----- exit code: 0 -----\n(full log: evidence/P14.log)"
+      },
+      {
+        "id": "P15",
+        "command": "[Re-run ALL Wave 2 exit gates on a tree produced only from the pinned tarball + wave-2.patch (fresh venv; set -eo pipefail): install, offline checks, Thin mode, api_counts vs v1.5.2 on JDK 8, pip-audit] set -eo pipefail; rm -rf /tmp/p15 /tmp/venv-p15 && mkdir /tmp/p15 && tar --no-same-owner -xzf /mnt/session/uploads/petclinic-infra.tar.gz -C /tmp/p15 2>/dev/null; cd /tmp/p15/petclinic-infra && git apply /mnt/session/outputs/wave-2.patch; PY=$(python3 -m uv python find 3.14.7); $PY -m venv /tmp/venv-p15; /tmp/venv-p15/bin/python -m pip install -q --disable-pip-version-check -r ops/requirements.txt; echo \"[W2-G1] install rc=0\"; /tmp/venv-p15/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py offline | tail -1; /tmp/venv-p15/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py thin 127.0.0.1:1/PETCLINIC | tail -1; /tmp/venv-p15/bin/python /mnt/session/outputs/evidence/w2_gate_tests.py api http://localhost:9966/petclinic/api/ 10 6 | grep -E \"api_counts =|SUMMARY\"; pip-audit --vulnerability-service osv --path /tmp/venv-p15/lib/python3.14/site-packages --progress-spinner off; echo \"ALL WAVE 2 EXIT GATES PASS ON PATCH-ONLY TREE\"",
+        "result": "PASS",
+        "output_excerpt": "[W2-G1] install rc=0\nSUMMARY: 0 failed check(s)\nSUMMARY: 0 failed check(s)\napi_counts = {'owners': 10, 'vets': 6}\nSUMMARY: 0 failed check(s)\nNo known vulnerabilities found\nALL WAVE 2 EXIT GATES PASS ON PATCH-ONLY TREE\n# ----- exit code: 0 -----\n(full log: evidence/P15.log)"
+      },
+      {
+        "id": "P16",
+        "command": "[Negative control for the code fixes: AS-IS ops/healthcheck.py (baseline commit) with the new libraries on 3.14.7 fails (reproduces R07 first error); step passes when it fails] mkdir -p /tmp/asis-hc/ops && git show HEAD:ops/healthcheck.py > /tmp/asis-hc/ops/healthcheck.py && cd /tmp/asis-hc && /tmp/venv-w2/bin/python -c \"import sys; sys.path.insert(0,\\\"ops\\\"); import healthcheck\" 2>&1 | tail -2; rc=${PIPESTATUS[0]}; echo \"rc=$rc (non-zero expected)\"; [ $rc -ne 0 ]",
+        "result": "PASS",
+        "output_excerpt": "    import cx_Oracle\nModuleNotFoundError: No module named 'cx_Oracle'\nrc=1 (non-zero expected)\n# ----- exit code: 0 -----\n(full log: evidence/P16.log)"
+      },
+      {
+        "id": "W3-P01",
+        "command": "[Supporting evidence for Wave 3 (partial): Maven Wrapper -> 3.9.16 + jcenter repository removed (pom.xml:33-40), JDK 8u504, EMPTY local repo (-Dmaven.repo.local=/tmp/m2-w3) so every artifact must resolve from Maven Central; full test suite] git diff; ./mvnw -B -V -Dmaven.repo.local=/tmp/m2-w3 clean package 2>&1 | grep -vE \"Download(ing|ed) from central\" ; rc=${PIPESTATUS[0]}; echo \"jcenter hits in build output: $(grep -c jcenter /mnt/session/outputs/evidence/W3-P01.log)\"; exit $rc",
+        "result": "PASS",
+        "output_excerpt": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\nTests run: 169, Failures: 0, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS\n# ----- exit code: 0 -----\n(full log: evidence/W3-P01.log)"
+      },
+      {
+        "id": "W3-P02",
+        "command": "[Supporting evidence for Wave 3: verify W3-P01 resolved nothing from jcenter and used Maven 3.9.16; OSV check of the Maven distribution (CVE-2021-26291 fixed in 3.8.1+)] L=/mnt/session/outputs/evidence/W3-P01.log; echo \"downloads from jcenter: $(grep -cE \"(Downloading|Downloaded) from jcenter\" $L || true)\"; grep -m1 \"Apache Maven 3.9.16\" $L; grep -m1 \"Tests run: 169, Failures: 0, Errors: 0\" $L; grep -m1 \"BUILD SUCCESS\" $L; curl -s -X POST https://api.osv.dev/v1/query -d \"{\\\"package\\\":{\\\"name\\\":\\\"org.apache.maven:maven-core\\\",\\\"ecosystem\\\":\\\"Maven\\\"},\\\"version\\\":\\\"3.9.16\\\"}\"; echo; curl -s -X POST https://api.osv.dev/v1/query -d \"{\\\"package\\\":{\\\"name\\\":\\\"org.apache.maven:maven-core\\\",\\\"ecosystem\\\":\\\"Maven\\\"},\\\"version\\\":\\\"3.3.3\\\"}\" | python3 -c \"import json,sys;print(\\\"maven-core 3.3.3 OSV ids:\\\",[v[\\\"id\\\"] for v in json.load(sys.stdin).get(\\\"vulns\\\",[])])\"; [ \"$(grep -cE \"(Downloading|Downloaded) from jcenter\" $L)\" = \"0\" ]",
+        "result": "PASS",
+        "output_excerpt": "downloads from jcenter: 0\nApache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)\nTests run: 169, Failures: 0, Errors: 0, Skipped: 0\n[INFO] BUILD SUCCESS\n{}\nmaven-core 3.3.3 OSV ids: ['GHSA-2f88-5hg8-9x2x']\n# ----- exit code: 0 -----\n(full log: evidence/W3-P02.log)"
+      },
+      {
+        "id": "T01",
+        "command": "[Gate-tool validation (negative control): tools/osv_maven.py on the AS-IS v1.5.2 dependency tree must report advisories (exit non-zero); step passes when it does] ./mvnw -B -q -Dmaven.repo.local=/tmp/m2-w3 dependency:list -DincludeScope=test -DoutputFile=target/deps.txt && python3 /mnt/session/outputs/tools/osv_maven.py target/deps.txt --scope runtime | tail -15; rc=${PIPESTATUS[0]}; echo \"rc=$rc (non-zero expected)\"; [ $rc -ne 0 ]",
+        "result": "PASS",
+        "output_excerpt": "artifacts checked: 77 (scope=runtime); OSV advisories: 225\nrc=1 (non-zero expected)\n# ----- exit code: 0 -----\n(full log: evidence/T01.log)"
+      }
+    ]
+  }
+}
