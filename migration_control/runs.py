@@ -95,8 +95,8 @@ PHASES = [  # (phase, regex on "tool label") — first match wins
     ("skill", r"/skills/[A-Za-z0-9_-]+/"),
     ("memory", r"/mnt/memory"),
     ("setup", r"git clone|git -C .* checkout|tar -?x|/mnt/session/uploads"),
-    ("build", r"\bmvn\b|mvnw|gradle|javac|npm (ci|install|run)|yarn|pnpm|\bng (build|update|test)|npx|pip install|venv|pytest|go (build|test)|cargo|dotnet|bundle|w\d_gate"),
-    ("research", r"^web_(search|fetch)|curl -s|osv\.dev|nvd\.nist|registry\.npmjs|pypi\.org|maven|endoflife|adoptium|nodejs\.org|github\.com/advisories"),
+    ("build", r"\bmvn\b|mvnw|gradle|javac|npm (ci|install|run)|yarn|pnpm|\bng (build|update|test)|npx|pip install|venv|pytest|go (build|test)|cargo|dotnet|bundle|w\d_gate|/logs?/\S*(build|baseline|B\d)|\bbuild\S*\.log"),
+    ("research", r"^web_(search|fetch)|curl -s|osv\.dev|nvd\.nist|registry\.npmjs|pypi\.org|maven|endoflife|adoptium|nodejs\.org|github\.com/advisories|/data/raw|cpu(jan|apr|jul|oct)\d{4}|\.html\b"),
     ("report", r"^write\b|/mnt/session/outputs|impact-report|impact-summary|migration-plan|jsonschema|\.patch"),
     ("code", r"/workspace/|grep -r|cat -n|sed -n"),
 ]

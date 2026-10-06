@@ -16,8 +16,11 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
 - `runner: {type: local, isolation: docker|none}`: Claude Code headless (`claude -p --output-format stream-json`), modules checked
   out locally, same prompts/rubrics/schemas; local grader loop (`--json-schema` verdict, failed criteria fed back via `--resume`);
   `.mig/memory/`; background runs + `mig stop`; live feed; `mig schedule install|remove` (cron).
-- Verified with a fake `claude` (tests/test_local.py + CLI walk-through). Not yet: a real scan in Docker (needs `claude setup-token`)
-  or on the host.
+- Verified with a fake `claude` (tests/test_local.py + CLI walk-through) and with a **real petclinic scan in Docker on a Claude
+  subscription (2026-10-06)**: 44.5 min active, grader `needs_revision` (incomplete inventory) → fix via `--resume` → `satisfied`;
+  184 components, 749 unique production CVEs, 8 builds attempted, report valid against schema 1.0, xlsx produced, memory written.
+  Equivalent API list cost reported by Claude Code: ~$21.65 for the two iterations.
+- Not yet run for real: the local planner, `isolation: none`, cron scheduling.
 - Known gaps: cron uses the machine's timezone; on Linux the container runs as the host uid (no passwd entry) — untested.
 
 ### Managed runner — verified against the live API (2026-10-06)
