@@ -63,8 +63,8 @@ def is_toolchain(c):
 def normalise_scan(d):
     """One cached scan (schema 1.0) → the shape the page expects."""
     meta = json.loads((d / "meta.json").read_text())
-    if not (d / "impact-report.json").exists():
-        return None
+    if not (d / "impact-report.json").exists() or meta.get("eval_case"):
+        return None   # eval re-runs live in `mig eval`, not in the estate's history
     rep = json.loads((d / "impact-report.json").read_text())
     summary = (d / "impact-summary.md").read_text() if (d / "impact-summary.md").exists() else ""
 

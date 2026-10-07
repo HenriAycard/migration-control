@@ -9,7 +9,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import RESOURCES, __version__, config, dashboard, local, provision, publish, render, runs
+from . import RESOURCES, __version__, config, dashboard, evals, local, provision, publish, render, runs
 from .api import ApiError, Client, load_dotenv
 from .state import State
 
@@ -198,8 +198,7 @@ def cmd_scan(a):
 def cmd_plan(a):
     cfg, st, client = _ctx()
     if cfg.local:
-        scans = [m for m in local.list_runs(st, "scans") if (st.cache / "scans" / m["id"] / "impact-report.json").exists()]
-        scan = a.scan or (scans[-1]["id"] if scans else None)
+        scan = a.scan or _latest_scan(st)
         if not scan:
             sys.exit("no finished scan with an impact-report.json yet — run `mig scan` first")
         return _local_start(cfg, st, "plans", scan, a)
@@ -230,6 +229,93 @@ def _local_start(cfg, st, kind, scan, a, **pr):
     else:
         pid = local.start(cfg, st, kind, rid)
         _say(f"▶ {rid} started in the background (pid {pid})\n  follow it live: `mig dashboard --serve` · status: `mig status` · stop: `mig stop {rid}`")
+
+
+def _latest_scan(st):
+    scans = [m for m in local.list_runs(st, "scans")
+             if not m.get("eval_case") and (st.cache / "scans" / m["id"] / "impact-report.json").exists()]
+    return scans[-1]["id"] if scans else None
+
+
+def _print_eval(results):
+    ok = True
+    for res in results:
+        passed = all(r["ok"] for r in res["results"])
+        ok &= passed
+        _say(f"{'✓' if passed else '✗'} case {res['case']} · run {res['run']}")
+        for r in res["results"]:
+            _say(f"    {'✓' if r['ok'] else '✗'} {r['check']:<32} {r['detail']}")
+    return ok
+
+
+def cmd_eval(a):
+    cfg, st, _ = _ctx(need_client=False)
+    if not cfg.local:
+        sys.exit("`mig eval` runs on the local runner for now")
+    if a.action == "add":
+        run = a.run or _latest_scan(st) or sys.exit("no finished scan yet")
+        path, case = evals.derive(cfg, st, a.name, run)
+        e = case["expect"]
+        _say(f"✓ {path.relative_to(cfg.root)} from {run}: {len(e['components'])} components, {len(e['alerts'])} alerts, "
+             f"{len(e['eol'])} EOL, ≥{e['min_critical_cves']} critical CVEs, ≥{e['min_builds_attempted']} builds\n"
+             "  Review/edit it, commit it with migration.yaml. `mig eval check` is free; `mig eval run` re-scans (costs a scan per case).")
+    elif a.action == "check":
+        cases = evals.load_cases(cfg, a.case)
+        if not cases:
+            sys.exit("no golden cases yet — `mig eval add <name>` from a scan you trust")
+        run = a.run or _latest_scan(st) or sys.exit("no finished scan to check")
+        results = evals.check_run(cfg, st, run, cases)
+        ok = _print_eval(results)
+        evals.record(cfg, st, results, full=False)
+        sys.exit(0 if ok else 1)
+    elif a.action == "run":
+        cases = evals.load_cases(cfg, a.case)
+        if not cases:
+            sys.exit("no golden cases yet — `mig eval add <name>` from a scan you trust")
+        if cfg["runner"]["isolation"] == "docker" and not st.get("local", "image"):
+            sys.exit("no image yet — run `mig up` first")
+        local.auth_status(cfg)
+        for c in cases:   # fail fast on ref drift before spending anything
+            if evals.refs_mismatch(cfg, c):
+                evals.start_case(cfg, st, c)
+        _say(f"▶ eval: {len(cases)} case(s), one full scan each, run one after the other with an isolated empty memory")
+        if a.foreground:
+            return _eval_worker(cfg, st, [c["name"] for c in cases])
+        log = open(st.dir / "evals-worker.log", "w")
+        p = subprocess.Popen([sys.executable, "-m", "migration_control", "_evals", *[c["name"] for c in cases]], cwd=cfg.root,
+                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        _say(f"  running in the background (pid {p.pid}) — `mig status` shows progress; results in `mig eval status`")
+    elif a.action == "status":
+        fp, last = evals.status(cfg, st)
+        _say(f"config fingerprint {fp}")
+        if not last:
+            _say("  no full eval run for this config yet — `mig eval run` before trusting a changed config")
+        else:
+            _say(f"  last full eval {last['at']}: {'PASSED' if last['passed'] else 'FAILED'}")
+            _print_eval(last["results"])
+
+
+def _eval_worker(cfg, st, names):
+    cases = evals.load_cases(cfg, names)
+    results = []
+    for c in cases:
+        rid = evals.start_case(cfg, st, c, log=_say)
+        verdict = local.start(cfg, st, "scans", rid, foreground=True)
+        if verdict == "paused":
+            _say(f"⏸ eval paused on a Claude usage limit at case {c['name']} ({rid}) — re-run `mig eval run` later")
+            return
+        try:
+            results += evals.check_run(cfg, st, rid, [c])
+        except RuntimeError as e:
+            results.append({"case": c["name"], "run": rid, "results": [{"check": "report produced", "ok": False, "detail": str(e)}]})
+    entry = evals.record(cfg, st, results, full=True)
+    _print_eval(results)
+    _say(f"{'✓ eval PASSED' if entry['passed'] else '✗ eval FAILED'} for config {entry['fingerprint']}")
+
+
+def cmd_evals_worker(a):
+    cfg, st, _ = _ctx(need_client=False)
+    _eval_worker(cfg, st, a.cases)
 
 
 def _latest_plan(st, plan=None):
@@ -320,6 +406,10 @@ def cmd_status(a):
         _say(f"project {cfg['project']} · runner local ({cfg['runner']['isolation']}) · model {local.model_of(cfg)}")
         if cfg.get("schedule"):
             _say(f"  schedule {cfg['schedule']['cron']} · " + ("installed in crontab" if local.schedule_installed(cfg) else "not installed (`mig schedule install`)"))
+        if evals.load_cases(cfg):
+            fp, last = evals.status(cfg, st)
+            _say("  evals: " + (f"{'passed' if last['passed'] else 'FAILED'} for the current config ({last['at'][:16]})" if last
+                               else "current config not evaluated yet — `mig eval run` before trusting it"))
         for kind in ("scans", "plans", "prs"):
             for m in local.list_runs(st, kind)[-5:]:
                 cost = f" · ${m['list_cost_cents'] / 100:.2f}" if m.get("list_cost_cents") is not None else ""
@@ -444,6 +534,16 @@ def main(argv=None):
     s.add_argument("--project", action="store_true", help="install in ./.claude/skills instead of ~/.claude/skills")
     s.add_argument("--force", action="store_true")
     s.set_defaults(fn=cmd_skill)
+    s = sub.add_parser("eval", help="golden cases: add one from a trusted scan, check a run (free), re-run them (costly)")
+    s.add_argument("action", choices=["add", "check", "run", "status"])
+    s.add_argument("name", nargs="?", help="add: the case name")
+    s.add_argument("--from", dest="run", help="add/check: scan run id (default: latest scan)")
+    s.add_argument("--case", action="append", help="check/run: only these cases (repeatable)")
+    s.add_argument("--foreground", action="store_true")
+    s.set_defaults(fn=cmd_eval)
+    s = sub.add_parser("_evals")  # internal: detached eval run
+    s.add_argument("cases", nargs="+")
+    s.set_defaults(fn=cmd_evals_worker)
     s = sub.add_parser("_worker")  # internal: detached local run
     s.add_argument("kind", choices=["scans", "plans", "prs"])
     s.add_argument("run")

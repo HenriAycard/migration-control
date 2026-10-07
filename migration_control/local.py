@@ -173,7 +173,7 @@ def _kind_dir(st, kind):
     return st.cache / kind
 
 
-def prepare(cfg, st, kind, scan_session=None, log=print, plan_run=None, wave=None):
+def prepare(cfg, st, kind, scan_session=None, log=print, plan_run=None, wave=None, memory_dir=None, eval_case=None):
     """Create the run dir, check out every module, write meta.json (status queued). Returns run id."""
     rid = new_run_id()
     work = st.dir / "work" / rid
@@ -205,13 +205,17 @@ def prepare(cfg, st, kind, scan_session=None, log=print, plan_run=None, wave=Non
             shutil.copytree(plan_dir / "outputs" / "evidence", work / "uploads" / "plan-evidence")
     d = _kind_dir(st, kind) / rid
     d.mkdir(parents=True, exist_ok=True)
-    title = f"PR · wave {wave} (local)" if kind == "prs" else f"{kind[:-1]} (local)"
+    title = f"PR · wave {wave} (local)" if kind == "prs" else f"eval {eval_case}" if eval_case else f"{kind[:-1]} (local)"
     meta = {"id": rid, "title": title, "created_at": now_iso(), "status": "queued", "runner": "local",
             "trigger": os.environ.get("MIG_TRIGGER", "manual"), "scan_session": scan_session, "agent_version": None,
             "plan_run": plan_run, "wave": wave, "review": {"state": "pending"} if kind == "prs" else None,
+            "eval_case": eval_case, "memory_dir": memory_dir,
+            "refs": {m.name: (m.ref if "repo" in m else f"path:{m['path']}") for m in cfg.modules},
+            "config_fingerprint": render.scanner_fingerprint(cfg) if kind == "scans" else None,
             "verdicts": [], "explanation": "", "active_seconds": 0, "list_cost_cents": None, "console": ""}
     (d / "meta.json").write_text(json.dumps(meta, indent=2))
-    st.set("last", {"scans": "scan", "plans": "plan", "prs": "pr"}[kind], value=rid)
+    if not eval_case:
+        st.set("last", {"scans": "scan", "plans": "plan", "prs": "pr"}[kind], value=rid)
     return rid
 
 
@@ -297,10 +301,10 @@ class Timeline:
         self.last_flush = time.time()
 
 
-def _paths(cfg, st, rid):
+def _paths(cfg, st, rid, memory_dir=None):
     work = st.dir / "work" / rid
     host = {"/mnt/session/outputs": work / "outputs", "/mnt/session/uploads": work / "uploads",
-            "/mnt/memory": st.dir / "memory", "/workspace": work / "workspace"}
+            "/mnt/memory": Path(memory_dir) if memory_dir else st.dir / "memory", "/workspace": work / "workspace"}
     return work, host
 
 
@@ -397,7 +401,7 @@ def work(cfg, st, kind, rid):
     """
     d = _kind_dir(st, kind) / rid
     meta = json.loads((d / "meta.json").read_text())
-    work_dir, host = _paths(cfg, st, rid)
+    work_dir, host = _paths(cfg, st, rid, meta.get("memory_dir"))
     loc = (lambda s: _localize(s, host)) if cfg["runner"]["isolation"] == "none" else (lambda s: s)
     if kind == "scans":
         system, task, rubric = (render.scanner_agent(cfg, "-", "-")["system"], render.scanner_task(cfg), render.scanner_rubric(cfg))

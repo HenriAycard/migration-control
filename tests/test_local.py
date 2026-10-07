@@ -134,3 +134,42 @@ def test_usage_limit_pauses_then_resume_finishes(tmp_path, monkeypatch):
     msgs = [i["text"] for i in json.loads((d / "timeline.json").read_text()) if i["k"] == "msg"]
     assert any("paused" in m for m in msgs) and any("resumed" in m for m in msgs)
     assert not (st.dir / "work" / rid / "workspace").exists()
+
+
+def test_eval_add_check_and_isolated_run(tmp_path, monkeypatch):
+    """Golden case from a satisfied scan; free check; eval re-run uses an empty memory and leaves production memory alone."""
+    from migration_control import RESOURCES, evals
+    pet = RESOURCES / "examples" / "petclinic"
+    report = next((pet / "recorded" / "scans").glob("*/impact-report.json"))
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    fake = bindir / "claude"; fake.write_text(FAKE_CLAUDE); fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_STATE", str(tmp_path)); monkeypatch.setenv("FAKE_REPORT", str(report))
+    proj = tmp_path / "proj"; (proj / "infra").mkdir(parents=True)
+    (proj / "infra" / "requirements.txt").write_text("requests==2.19.0\n")
+    (proj / "migration.yaml").write_text(yaml.safe_dump({
+        "version": 1, "project": "demo", "runner": {"type": "local", "isolation": "none"},
+        "estate": [{"name": "petclinic-infra", "path": "infra"}], "agents": {"max_iterations": 3, "planner": False}}))
+    cfg = config.load(proj); st = State(proj)
+    (st.dir / "memory").mkdir(parents=True); (st.dir / "memory" / "scan-state.json").write_text('{"prod": true}')
+
+    rid = local.prepare(cfg, st, "scans", log=lambda *_: None)
+    local.work(cfg, st, "scans", rid)
+    path, case = evals.derive(cfg, st, "baseline", rid)
+    assert case["refs"] == {"petclinic-infra": "path:infra"} and case["fingerprint"] == render.scanner_fingerprint(cfg)
+    assert all(r["ok"] for r in evals.check_run(cfg, st, rid, [case])[0]["results"])
+
+    # a report that lost a component and an alert fails the case
+    rep = json.loads(report.read_text()); rep["components"] = rep["components"][1:]; rep["alerts"] = []
+    bad = evals.check(case, rep, {"verdicts": ["satisfied"]})
+    assert {r["check"] for r in bad if not r["ok"]} >= {"known components found", "critical alerts raised"}
+
+    erid = evals.start_case(cfg, st, case, log=lambda *_: None)
+    local.work(cfg, st, "scans", erid)
+    meta = json.loads((st.cache / "scans" / erid / "meta.json").read_text())
+    assert meta["eval_case"] == "baseline" and meta["memory_dir"].endswith("evals/memory/baseline")
+    assert (st.dir / "memory" / "scan-state.json").read_text() == '{"prod": true}'      # production memory untouched
+    assert st.get("last", "scan") == rid                                                # eval runs never become "the latest scan"
+    assert all(s["session"] != erid for s in dashboard.payload(cfg, st)["scans"])        # nor show in the estate history
+    entry = evals.record(cfg, st, evals.check_run(cfg, st, erid, [case]), full=True)
+    assert entry["passed"] and evals.status(cfg, st)[1]["at"] == entry["at"]

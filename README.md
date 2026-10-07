@@ -23,6 +23,22 @@ mig init --example petclinic
 mig dashboard --offline        # replays real recorded runs: 3 scans, a 7-wave plan, a gated PR
 ```
 
+## Golden cases: `mig eval`
+
+Before trusting a changed config (prompts, rubric, policy, model), check it against scans you already trust:
+
+```bash
+mig eval add petclinic-baseline       # derive evals/petclinic-baseline.yaml from the latest satisfied scan — commit it
+mig eval check                        # free: check the latest scan against every case
+mig eval run                          # re-scan each case (isolated, empty memory) and check it — costs a scan per case
+mig eval status                       # did the *current* config pass a full eval?
+```
+
+A case records the refs that were scanned and stable facts from its report — components and their current versions,
+critical alerts, end-of-life flags, lower bounds on critical CVEs and builds — checked with "at least" semantics, so new
+CVEs never fail a case while a lost component or alert does. `mig status` warns when the config changed since the last
+passing eval. Eval re-runs never touch the production memory or the dashboard history.
+
 ## Where the agents run
 
 | `runner` | How | Auth | Code leaves your machine? |
@@ -149,6 +165,7 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 | `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
 | `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
 | `mig skill install [--project]` | install the `/migrate` Claude Code skill |
+| `mig eval add\|check\|run\|status` | golden cases for the scanner |
 
 ## Safety model
 

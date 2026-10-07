@@ -143,6 +143,12 @@ def environment(cfg):
                        "packages": copy.deepcopy(cfg["sandbox"].get("packages") or {})}}
 
 
+def scanner_fingerprint(cfg):
+    """What the scanner gets (prompts, rubric, model, runner): if it changes, earlier eval results no longer vouch for it."""
+    return fingerprint({"system": scanner_agent(cfg, "-", "-")["system"], "task": scanner_task(cfg),
+                        "rubric": scanner_rubric(cfg), "model": cfg["agents"]["model"], "runner": cfg["runner"]})
+
+
 def fingerprint(obj):
     return hashlib.sha256(json.dumps(obj, sort_keys=True).encode()).hexdigest()[:16]
 

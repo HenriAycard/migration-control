@@ -47,7 +47,10 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
 - Still open: `mig pr` on the managed runner; optional mode where the agent opens the PR itself via the GitHub MCP server.
 - ✅ **Claude Code skill `/migrate`** (`mig skill install`): interview → `migration.yaml` → `mig validate · doctor · up`; runs only on the
   user's go-ahead; secrets never through the chat. Packaged + frontmatter tested; not yet exercised in a live interview.
-- **`mig eval`**: replay golden cases against a new agent version before promoting it to the deployment.
+- ✅ **`mig eval`** (local runner): `add` derives a golden case from a satisfied scan (refs + stable facts), `check` is free,
+  `run` re-scans each case sequentially with an isolated empty memory, `status`/`mig status` tie results to the scanner config
+  fingerprint. Verified: unit + fake end-to-end, and `add`/`check` on the real petclinic scan. A real `eval run` not done yet
+  (costs a full scan). Managed runner: not yet.
 - Demo mode for any project (today it only plays the bundled petclinic recording).
 - Approvals relay in the dashboard for any `requires_action` session.
 
