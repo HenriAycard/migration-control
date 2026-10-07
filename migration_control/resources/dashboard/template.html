@@ -1255,17 +1255,23 @@ $("#import").onchange = async e => { const f = e.target.files[0]; if (!f) return
 
 /* ════════════════════════ DEMO MODE ══════════════════════════════════════ */
 const demo = { on: false, mode: "short", ch: 0, token: 0, skip: false, paused: false, server: location.protocol.startsWith("http"), prResult: null };
-const CH = [
-  { id: "intro", title: "Migration Control", short: "From “are we exposed?” to a reviewable pull request — three Claude Managed Agents do the work, humans decide at every step that matters.", long: "A regulated estate must always run the latest official versions and security patches, with no known CVE. Three managed agents — scanner, planner, PR agent — do the work. Humans step in four times: triage, decisions, GitHub approvals, merge." },
-  { id: "trigger", title: "1 · Saturday 06:00 — the deployment fires", short: "A scheduled deployment wakes the scanner agent in its own sandbox. Nobody at a keyboard.", long: "A scheduled deployment (cron 0 6 * * 6, Europe/Paris) starts a fresh session: the scanner agent, its sandbox with JDK 17 and Maven, its skills, and a memory store holding last week's scan." },
-  { id: "scan", title: "2 · The scanner inspects the whole estate", short: "It clones every module, loads its skills, queries official sources for versions and CVEs — and actually builds on target versions.", long: "Java backend, Angular front-end, Python ops and Oracle inventory are analysed together. The agent follows the house regulated-sourcing skill: every version and CVE comes from an official source (NVD, OSV, vendor advisories) or is tagged UNVERIFIED; the xlsx skill produces the auditors' workbook. Builds on target versions are really attempted." },
-  { id: "grade", title: "3 · An independent grader checks the Outcome", short: "A separate grader verifies every criterion of the definition of done. Click the 🎯 shield any time to see them.", long: "The grader is independent from the agent: it reads the real outputs and checks each criterion of the Outcome rubric. One failure means needs_revision — the agent fixes and resubmits, up to 3 times. Only 'satisfied' delivers the report." },
-  { id: "triage", title: "4 · ✋ Your turn — triage the alerts", short: "Every alert lands with the approvers. Triage the Oracle alert: pick “In progress” (a wave will fix it) or “Accepted risk”.", long: "Each bubble is a component (size = CVEs, colour = worst severity, halo = open alert). Approvers triage every alert: In progress when a wave will fix it, Accepted risk with a note for the auditors, Fixed once merged. Triage the Oracle alert now." },
-  { id: "plan", title: "5 · The planner turns findings into waves", short: "Seven ordered waves with gates, rollback and approvers. Some waves are 🔒 locked by decisions only humans can take.", long: "The planner orders upgrades by dependency, gives every wave measurable entry/exit gates, a rollback and named approvers, and proves wave 2 end-to-end in a sandbox. It also raises the decisions it cannot take for you — each one locks the waves it blocks (🔒)." },
-  { id: "decide", title: "6 · ✋ Your turn — sign the decision that unlocks wave 2", short: "Wave 2 is locked by D11. Approve (or defer) it to unlock the wave.", long: "Decisions are the planner's questions to the approvers: target versions, patch windows, risks to accept. D11 — how the Oracle read-only password is provided in production — blocks wave 2. Sign it off to unlock the wave for the PR agent." },
-  { id: "pr", title: "7 · ✋ The PR agent asks before every GitHub write", short: "It re-runs the wave's gates, then pauses before each write. You allow or deny.", long: "Before touching GitHub, the PR agent re-applies the proven patch and re-runs every provable gate. Every write — branch, push, pull request — pauses the session until a human approves. Merge and delete are disabled for the agent." },
-  { id: "finale", title: "8 · A reviewable pull request", short: "Opened, not merged. Tech lead, security and platform-ops sign off — humans merge.", long: "The pull request carries the why, the file:line changes, every gate result with evidence, the rollback and an approvers checklist. The agent cannot merge it." },
-];
+let CH = [];
+function buildChapters(sc, plan, target, triageC, prRun) {
+  const mods = DATA.modules || [], names = mods.map(m => m.name).join(", ");
+  const sched = DATA.schedule_label && !/manual|not installed/.test(DATA.schedule_label) ? DATA.schedule_label : null;
+  const pw = plan ? plan.proof.wave : null;
+  return [
+    { id: "intro", title: `Migration Control · ${DATA.project || ""}`, short: "From “are we exposed?” to a reviewable pull request — Claude agents do the work, humans decide at every step that matters.", long: `${mods.length} modules must run the latest official versions and security patches, with no known CVE. Agents scan, plan and prepare pull requests; humans triage, decide, approve every write and merge.` },
+    { id: "trigger", title: sched ? `1 · ${sched} — the scan starts` : "1 · A scan starts — on demand", short: sched ? "The schedule wakes the scanner in its own sandbox. Nobody at a keyboard." : "One command (`mig scan`) starts the scanner in its own sandbox.", long: "A fresh sandbox per run: the modules checked out at their production refs, the sourcing skill, and the memory of the previous scan for the “new since last scan” section." },
+    { id: "scan", title: "2 · The scanner inspects the whole estate", short: `It analyses ${names} together, queries official sources for versions and CVEs — and actually builds on target versions.`, long: `Modules are never analysed in isolation: cross-module constraints decide the migration order. Every version and CVE comes from an official source (NVD, OSV, vendor advisories) or is tagged UNVERIFIED, and builds on target versions are really attempted.` },
+    { id: "grade", title: "3 · An independent grader checks the Outcome", short: "A separate grader verifies every criterion of the rubric. Click the 🎯 shield any time to see them.", long: "The grader is independent from the agent: it reads the real outputs and checks each criterion. One failure means needs_revision — the agent fixes and resubmits. Only 'satisfied' delivers the report." },
+    { id: "triage", title: "4 · ✋ Your turn — triage the alerts", short: triageC ? `Every alert lands with the approvers. Triage the ${triageC.name} alert: “In progress” (a wave will fix it) or “Accepted risk”.` : "Every alert lands with the approvers.", long: "Each bubble is a component (size = CVEs, colour = worst severity, halo = open alert). Approvers triage every alert: In progress when a wave will fix it, Accepted risk with a note for the auditors, Fixed once merged." },
+    { id: "plan", title: "5 · The planner turns findings into waves", short: plan ? `${plan.waves.length} ordered waves with gates, rollback and approvers. Some are 🔒 locked by decisions only humans can take.` : "Ordered waves with gates, rollback and approvers.", long: plan ? `The planner orders upgrades by dependency, gives every wave measurable entry/exit gates, a rollback and named approvers, and proves wave ${pw} end-to-end in a sandbox. Decisions it cannot take lock the waves they block (🔒).` : "" },
+    { id: "decide", title: target ? `6 · ✋ Your turn — sign the decision that unlocks wave ${pw}` : "6 · ✋ Your turn — sign the decisions", short: target ? `Wave ${pw} is locked by ${target.id}. Approve (or defer) it to unlock the wave.` : "Approve or defer each blocking decision.", long: target ? `${target.id} — ${String(target.d.decision || "").slice(0, 160)} — blocks wave ${pw}. Sign it off to unlock the wave for the PR agent.` : "" },
+    { id: "pr", title: "7 · ✋ The PR agent prepares, you approve", short: DATA.pr_run ? "It re-runs the wave's gates, then pauses before each GitHub write. You allow or deny." : "It re-applies the wave in a sandbox and re-runs its gates. It has no write access: you review the diff and approve before anything is published.", long: DATA.pr_run ? "Every write — branch, push, pull request — pauses the session until a human approves. Merge and delete are disabled for the agent." : "The PR agent prepares one patch per repository, a gate results table and an approver-ready description. Only after your approval does migration-control push the branch and open the pull/merge request with your token." },
+    { id: "finale", title: "8 · A reviewable pull request", short: "Opened, not merged — the approvers sign off, humans merge.", long: "The pull request carries the why, the file:line changes, every gate result with evidence, the rollback and an approvers checklist." },
+  ];
+}
 const recFmt = iso => iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "";
 function dwait(ms) {
   const tok = demo.token; let left = ms;
@@ -1346,6 +1352,12 @@ async function runDemo(mode) {
   const scanIdx = DATA.scans.map((s, i) => [s, i]).filter(([s]) => s.timeline && s.timeline.length).slice(-1)[0][1];
   const sc = DATA.scans[scanIdx];
   state.scanIdx = scanIdx; $("#scan").value = scanIdx; renderKpis();
+  const plan0 = planFor(sc), target0 = plan0 ? openDecisionsFor(plan0.proof.wave)[0] : null;
+  const rank = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+  const alerted = sc.components.filter(c => c.alert && c.scope === "production").sort((a, b) => (rank[a.alert.severity] ?? 9) - (rank[b.alert.severity] ?? 9) || total(b) - total(a));
+  const triageC = alerted[0], secondC = alerted[1];
+  const localPr = (DATA.pr_runs || []).filter(r => r.status === "idle" && r.pr && r.timeline && r.timeline.length).slice(-1)[0];
+  CH = buildChapters(sc, plan0, target0, triageC, localPr);
   const skipper = setInterval(() => {
     if (!demo.skip || !replay.playing) return;
     demo.skip = false; replay.playing = false;
@@ -1355,7 +1367,8 @@ async function runDemo(mode) {
   const stop = () => { clearInterval(skipper); return !alive(); };
   // 0 intro
   caption(0); go("flow"); buildFlow(); resetRun();
-  $("#dsub").innerHTML = `Recorded runs: scan ${recFmt(sc.created_at)} · plan ${recFmt((DATA.plans[0] || {}).created_at)} · PR agent ${recFmt((DATA.pr_run || {}).created_at)}`;
+  const prAt = (DATA.pr_run || localPr || {}).created_at;
+  $("#dsub").innerHTML = `Recorded runs: scan ${recFmt(sc.created_at)}${plan0 ? ` · plan ${recFmt(plan0.created_at)}` : ""}${prAt ? ` · PR agent ${recFmt(prAt)}` : ""}`;
   await dwait(L ? 6000 : 3500); if (!alive()) return stop();
   // 1 trigger
   caption(1); particle(flowEls.wires.clock_scan, "var(--accent)", 1400, 8); flash(flowEls.clock); setSub("");
@@ -1365,7 +1378,7 @@ async function runDemo(mode) {
   await runTimeline(sc.timeline, "scanner", L ? 55 : 30, { run: runRef("scanner", sc, `scan · ${sc.scan_date}`), onItem: it => {
     if (it.k === "tool" && it.phase === "build") { builds++; if (it.err) fails++; setSub(`🔨 ${builds} build steps so far${fails ? ` · ${fails} failed (captured as impact evidence)` : ""}`); }
     if (it.k === "tool" && it.phase === "research") setSub(`🔎 ${esc(it.label).slice(0, 90)}`);
-    if (it.k === "tool" && it.phase === "skill") setSub("📚 Loading a skill — the house sourcing rules and the Excel toolkit (click the Skills station for the list)");
+    if (it.k === "tool" && it.phase === "skill") setSub("📚 Loading a skill — the house sourcing rules (click the Skills station for the list)");
     if (it.k === "eval_start") { caption(3); setSub(`🎯 Grading against the ${(DATA.rubrics.scanner || []).length} Outcome criteria…`); }
     if (it.k === "eval_end") setSub(`✅ Verdict: ${it.result}`);
   } });
@@ -1377,13 +1390,15 @@ async function runDemo(mode) {
   // 4 triage (your turn)
   caption(4); setSub(""); go("estate");
   await dwait(L ? 2500 : 1500); if (!alive()) return stop();
-  if (L) { openComponent("apache-tomcat"); await dwait(6000); closeDrawer(); if (!alive()) return stop(); }
-  openComponent("oracle-database");
-  $$("#tri button").forEach(b => b.classList.add("your-turn"));
-  setSub("✋ Your turn: pick a triage status for the Oracle alert (Space to skip)");
-  const tr = await waitAction(h => { demo.onTriage = h; }); if (tr === "abort") return stop();
-  $$("#tri button").forEach(b => b.classList.remove("your-turn"));
-  setSub(tr === "acted" ? "✓ Triage recorded — with who and when, for the auditors" : ""); await dwait(1800); closeDrawer();
+  if (L && secondC) { openComponent(secondC.key); await dwait(6000); closeDrawer(); if (!alive()) return stop(); }
+  if (triageC) {
+    openComponent(triageC.key);
+    $$("#tri button").forEach(b => b.classList.add("your-turn"));
+    setSub(`✋ Your turn: pick a triage status for the ${triageC.name} alert (Space to skip)`);
+    const tr = await waitAction(h => { demo.onTriage = h; }); if (tr === "abort") return stop();
+    $$("#tri button").forEach(b => b.classList.remove("your-turn"));
+    setSub(tr === "acted" ? "✓ Triage recorded — with who and when, for the auditors" : ""); await dwait(1800); closeDrawer();
+  }
   if (!alive()) return stop();
   // 5 plan
   caption(5); go("flow"); setSub("");
@@ -1408,12 +1423,21 @@ async function runDemo(mode) {
     await dwait(3500); if (!alive()) return stop();
   }
   // 7 PR agent with approvals
-  caption(7); go("flow"); setSub("🔬 Re-applying the patch and re-running the wave's exit gates in the sandbox…");
+  if (DATA.pr_run || localPr) { caption(7); go("flow"); setSub("🔬 Re-applying the patch and re-running the wave's exit gates in the sandbox…"); }
+  if (!DATA.pr_run && localPr) {
+    await runTimeline(compress(localPr.timeline, 25), "pr", L ? 24 : 12, { run: runRef("pr", { grader: localPr.grader, grader_text: localPr.grader_text, console: "" }, `PR agent · wave ${localPr.wave}`),
+      onItem: it => { if (it.k === "tool" && it.phase === "build") setSub(`🔬 ${esc(it.label).slice(0, 100)}`); } });
+    if (!alive()) return stop();
+    go("journey"); const wi = plan0 ? plan0.waves.findIndex(w => w.wave === localPr.wave) : -1;
+    if (wi >= 0) { openWave(wi); await dwait(300); const box = $("#dbody .prbox"); if (box) box.scrollIntoView({ behavior: REDUCED ? "auto" : "smooth", block: "start" }); }
+    setSub(localPr.review.state === "approved" ? "✅ Approved by a human — then published by migration-control with the local token" : "✋ The diff, the gates and the description wait for your approval — nothing is published before it");
+    await dwait(L ? 9000 : 6000); closeDrawer(); if (!alive()) return stop();
+  }
   if (DATA.pr_run) {
     const calls = Object.fromEntries(DATA.pr_run.calls.map(c => [c.id, c]));
     const items = compress(DATA.pr_run.timeline.filter(x => x.k !== "confirm"), 25);
     let gate = null;
-    const prP = runTimeline(items, "pr", L ? 30 : 16, { run: runRef("pr", DATA.pr_run, "PR agent · wave 2"), onItem: it => {
+    const prP = runTimeline(items, "pr", L ? 30 : 16, { run: runRef("pr", DATA.pr_run, `PR agent · wave ${DATA.pr_run.wave || "?"}`), onItem: it => {
       if (it.k === "tool" && /gate|pip-audit|apply/.test(it.label)) setSub(`🔬 ${esc(it.label).slice(0, 100)}`);
       if (it.k === "await") { gate = it; return "pause"; }
     } });
@@ -1430,23 +1454,29 @@ async function runDemo(mode) {
   if (stop()) return;
   // 8 finale
   caption(8); go("flow");
-  if (demo.prResult) { const lbl = $$("#flowSvg .node-label").find(t => t.textContent.startsWith("PR ")); if (lbl) lbl.textContent = `PR #${demo.prResult.number} · wave 2 (demo)`; }
+  if (demo.prResult) { const lbl = $$("#flowSvg .node-label").find(t => t.textContent.startsWith("PR ")); if (lbl) lbl.textContent = `PR #${demo.prResult.number} · wave ${(DATA.pr_run || {}).wave || "?"} (demo)`; }
   const url = demo.prResult ? demo.prResult.url : (DATA.pr_run || {}).original_url || ((DATA.prs || [])[0] || {}).url;
   const num = demo.prResult ? demo.prResult.number : ((DATA.prs || [])[0] || {}).number;
-  const mins = x => Math.round((x || 0) / 60), pl = planFor(sc) || {};
+  const mins = x => Math.round((x || 0) / 60), pl = planFor(sc) || {}, prMeta = DATA.pr_run || localPr || {};
+  const heading = url ? `Pull request ${num ? "#" + esc(num) : ""} was published` : localPr ? `The wave ${localPr.wave} pull request is ready for approval` : plan0 ? "The migration plan is ready" : "The impact report is ready";
+  const how = demo.prResult ? `Created live during this demo on <b>${esc(DATA.demo_repo)}</b> by replaying the agent's approved calls.`
+    : url ? "Published only after a human approved the prepared change. Not merged — the approvers sign off first, humans merge."
+    : localPr ? `Review it in wave ${localPr.wave}'s drawer: approve to publish it with your token, or deny.`
+    : plan0 ? "Next: sign the blocking decisions, then `mig pr <wave>` on the first unlocked wave." : "Next: `mig plan`.";
+  const link = (u, l) => u ? `<a href="${esc(u)}" target="_blank" rel="noopener">${l}</a>` : l;
   setTimeout(() => { burstDom(innerWidth / 2, innerHeight / 3); setTimeout(() => burstDom(innerWidth / 3, innerHeight / 2), 400); setTimeout(() => burstDom(2 * innerWidth / 3, innerHeight / 2), 800); }, 200);
   openModal(`<div class="finale">
     <div class="fbig">🎉</div>
-    <h2>Pull request ${num ? "#" + esc(num) : ""} is open on GitHub</h2>
-    <p class="sub">${demo.prResult ? `Created live during this demo on <b>${esc(DATA.demo_repo)}</b> by replaying the agent's approved calls.` : "Opened by migration-pr-agent after human approval."} Not merged — tech lead, security and platform-ops sign off first.</p>
-    <p><a class="btn primary" href="${esc(url || "#")}" target="_blank" rel="noopener">Open the pull request ↗</a> ${demo.prResult && DATA.pr_run ? `<a class="btn" href="${esc(DATA.pr_run.original_url)}" target="_blank" rel="noopener">Original PR ↗</a>` : ""}</p>
+    <h2>${heading}</h2>
+    <p class="sub">${how}</p>
+    ${url ? `<p><a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener">Open the pull request ↗</a> ${demo.prResult && DATA.pr_run && DATA.pr_run.original_url ? `<a class="btn" href="${esc(DATA.pr_run.original_url)}" target="_blank" rel="noopener">Original PR ↗</a>` : ""}</p>` : ""}
     <div class="fstats">
       <div><b>${mins(sc.active_seconds)} min</b><span>scanner · ${fmt(sc.cves_prod_total)} CVEs found</span></div>
-      <div><b>${mins(pl.active_seconds)} min</b><span>planner · ${(pl.waves || []).length} waves</span></div>
-      <div><b>${mins((DATA.pr_run || {}).active_seconds)} min</b><span>PR agent · gates re-run</span></div>
-      <div><b>4</b><span>human checkpoints · 0 writes without one</span></div>
+      ${plan0 ? `<div><b>${mins(pl.active_seconds)} min</b><span>planner · ${(pl.waves || []).length} waves</span></div>` : ""}
+      ${prMeta.active_seconds ? `<div><b>${mins(prMeta.active_seconds)} min</b><span>PR agent · gates re-run</span></div>` : ""}
+      <div><b>${(DATA.pr_run || localPr) ? 4 : 2}</b><span>human checkpoints · 0 writes without one</span></div>
     </div>
-    <p class="muted" style="font-size:12px">Every step shown was replayed from real Claude Managed Agents sessions: <a href="${esc(sc.console)}" target="_blank" rel="noopener">scan</a> · <a href="${esc(pl.console || "#")}" target="_blank" rel="noopener">plan</a> · <a href="${esc((DATA.pr_run || {}).console || "#")}" target="_blank" rel="noopener">PR agent</a>. Your demo triage and decisions were kept separate from the real ones.</p>
+    <p class="muted" style="font-size:12px">Every step shown was replayed from real recorded runs: ${link(sc.console, "scan")}${plan0 ? ` · ${link(pl.console, "plan")}` : ""}${(DATA.pr_run || localPr) ? ` · ${link(prMeta.console, "PR agent")}` : ""}. Your demo triage and decisions are kept apart from the real ones.</p>
     <div class="acts" style="justify-content:center"><button class="btn" id="fRestart">↺ Restart demo</button><button class="btn" id="fExit">Exit demo</button></div></div>`);
   $("#fRestart").onclick = () => openLauncher(); $("#fExit").onclick = () => { closeModal(); exitDemo(); };
   setSub("Demo complete.");
@@ -1461,7 +1491,7 @@ function exitDemo() {
 async function openLauncher() {
   exitDemo();
   openModal(`<h2 style="margin-top:0">🎬 Demo</h2>
-    <p class="sub">Replays the real recorded runs — scan, grading, plan, pull request — end to end, with you approving the agent's GitHub writes.</p>
+    <p class="sub">Replays this estate's real recorded runs — scan, grading, plan${(DATA.pr_runs || []).length || DATA.pr_run ? ", pull request" : ""} — end to end, with you taking the human decisions.</p>
     <div class="dmodes">
       <button class="dmode" data-m="short"><b>⚡ Short</b><span>~2–3 min · the story, for sponsors</span></button>
       <button class="dmode" data-m="long"><b>🔬 Long</b><span>~5 min · with evidence, for tech leads & security</span></button>
@@ -1469,6 +1499,7 @@ async function openLauncher() {
     <div id="dstatus" class="reco" style="margin-top:12px"><b>GitHub</b>${demo.server ? "Checking the demo repository…" : "Snapshot mode (file://): approvals are shown but nothing is sent to GitHub; the finale links to the original pull request. Run <code>python3 dashboard/serve.py</code> to create the PR live."}</div>
     <p class="muted" style="font-size:12px;margin:10px 0 0">Keys: <span class="kbd">Space</span> next · <span class="kbd">P</span> pause · <span class="kbd">Esc</span> exit</p>`);
   $$(".dmode").forEach(b => b.onclick = () => runDemo(b.dataset.m));
+  if (!DATA.pr_run) { $("#dstatus").remove(); return; }
   if (demo.server) {
     try {
       const st = await (await fetch("api/demo/status", { cache: "no-store" })).json(); if (st.error) throw st.error;

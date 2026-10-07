@@ -289,7 +289,7 @@ def payload(cfg, st):
         "agent_id": st.get("agents", "scanner", "id"), "deployment": dep,
         "scans": scans, "plans": plans, "prs": prs, "pr_run": pr_run, "pr_runs": pr_runs, "rubrics": rubrics, "agents": agents,
         "local": cfg.local,
-        "demo": bool(st.get("example")) and pr_run is not None, "demo_repo": st.get("example_demo_repo"),
+        "demo": any(s.get("timeline") for s in scans), "demo_repo": st.get("example_demo_repo"),
     }
 
 

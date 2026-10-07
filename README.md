@@ -7,7 +7,8 @@ inventories every component of every module, finds the latest official versions,
 locates the breaking changes in *your* code (`file:line`), actually builds on target versions in a sandbox,
 and maps how modules constrain each other. A planner agent turns that into ordered, gated, reversible
 migration waves and proves the first one. An independent grader checks every run against a rubric.
-**Migration Control**, a local dashboard, shows all of it — live.
+**Migration Control**, a local dashboard, shows all of it — live — and its 🎬 demo mode replays your own recorded runs as a
+narrated walkthrough for sponsors, tech leads and security.
 
 ```
 🗓️ schedule ─▶ 🔭 scanner ─▶ 🎯 grader ─▶ ✋ triage ─▶ 🗺️ planner ─▶ ✋ decisions ─▶ 🔀 PR agent ─▶ ✋ approve ─▶ PR / MR

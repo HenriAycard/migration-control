@@ -51,7 +51,10 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   `run` re-scans each case sequentially with an isolated empty memory, `status`/`mig status` tie results to the scanner config
   fingerprint. Verified: unit + fake end-to-end, and `add`/`check` on the real petclinic scan. A real `eval run` not done yet
   (costs a full scan). Managed runner: not yet.
-- Demo mode for any project (today it only plays the bundled petclinic recording).
+- ✅ Demo mode for any project: available as soon as a scan has a timeline; chapters computed from the data (schedule or
+  on-demand, modules, most critical alert to triage, decision blocking the proven wave, local PR run or recorded managed PR,
+  finale with the published PR or "ready for approval"). Played end to end (short mode) on the real petclinic runs and on the
+  bundled example with Playwright: 8/8 chapters, no JS error. The flow's PR node shows the PR as published, not its live state.
 - Approvals relay in the dashboard for any `requires_action` session.
 
 ## v2
