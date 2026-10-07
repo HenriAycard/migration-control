@@ -1,6 +1,6 @@
 # migration-control
 
-[![CI](https://github.com/<owner>/migration-control/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/migration-control/actions/workflows/ci.yml)
+[![CI](https://github.com/HenriAycard/migration-control/actions/workflows/ci.yml/badge.svg)](https://github.com/HenriAycard/migration-control/actions/workflows/ci.yml)
 ![status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
 **Whole-estate version, CVE and upgrade migrations, run by Claude — on your machine with Claude Code, or on Claude
@@ -22,7 +22,7 @@ your own recorded runs as a narrated walkthrough for sponsors, tech leads and se
 ## Try it in 30 seconds — no key, no cost
 
 ```bash
-pipx install git+https://github.com/<owner>/migration-control    # or: pip install … in a venv
+pipx install git+https://github.com/HenriAycard/migration-control    # or: pip install … in a venv
 mkdir petclinic && cd petclinic
 mig init --example petclinic
 mig dashboard --offline        # real recorded runs: 3 scans, a 7-wave plan, a gated PR — try the 🎬 Demo button

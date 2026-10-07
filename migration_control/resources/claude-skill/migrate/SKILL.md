@@ -25,7 +25,7 @@ user in control of every cost and every write.
 
 ## 0. Is `mig` installed?
 
-Run `mig --version`. If missing: `pipx install git+https://github.com/<owner>/migration-control` (or
+Run `mig --version`. If missing: `pipx install git+https://github.com/HenriAycard/migration-control` (or
 `pip install …` in a venv) — ask the user which, they own their Python setup. Also check `git --version`,
 `claude --version`, and, for Docker isolation, `docker info`.
 

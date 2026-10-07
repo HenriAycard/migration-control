@@ -6,7 +6,7 @@ Schemas as data, and one self-contained dashboard page.
 ## Set up
 
 ```bash
-git clone https://github.com/<owner>/migration-control && cd migration-control
+git clone https://github.com/HenriAycard/migration-control && cd migration-control
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/ruff check . && .venv/bin/pytest -q
 ```
