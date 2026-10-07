@@ -1,57 +1,52 @@
 # migration-control
 
-**Whole-estate version, CVE and upgrade migrations, run by Claude — on your machine with Claude Code, or on Claude Managed Agents — steered from a local dashboard.**
+[![CI](https://github.com/<owner>/migration-control/actions/workflows/ci.yml/badge.svg)](https://github.com/<owner>/migration-control/actions/workflows/ci.yml)
+![status: alpha](https://img.shields.io/badge/status-alpha-orange)
 
-Point it at the repositories you migrate together (GitHub or GitLab, public or private). A scanner agent
-inventories every component of every module, finds the latest official versions, security patches and CVEs,
-locates the breaking changes in *your* code (`file:line`), actually builds on target versions in a sandbox,
-and maps how modules constrain each other. A planner agent turns that into ordered, gated, reversible
-migration waves and proves the first one. An independent grader checks every run against a rubric.
-**Migration Control**, a local dashboard, shows all of it — live — and its 🎬 demo mode replays your own recorded runs as a
-narrated walkthrough for sponsors, tech leads and security.
+**Whole-estate version, CVE and upgrade migrations, run by Claude — on your machine with Claude Code, or on Claude
+Managed Agents — steered from a local dashboard, with a human approving every write.**
+
+Point it at the repositories you migrate together (GitHub or GitLab, public or private). A **scanner** agent inventories
+every component of every module, finds the latest official versions, security patches and CVEs, locates the breaking
+changes in *your* code (`file:line`), actually builds on target versions in a sandbox, and maps how modules constrain
+each other. A **planner** turns that into ordered, gated, reversible migration waves and proves the first one. A **PR
+agent** prepares the pull request for a wave — and you approve it before anything is pushed. An independent grader checks
+every run against a rubric. **Migration Control**, a local dashboard, shows all of it live, and its 🎬 demo mode replays
+your own recorded runs as a narrated walkthrough for sponsors, tech leads and security.
 
 ```
-🗓️ schedule ─▶ 🔭 scanner ─▶ 🎯 grader ─▶ ✋ triage ─▶ 🗺️ planner ─▶ ✋ decisions ─▶ 🔀 PR agent ─▶ ✋ approve ─▶ PR / MR
-                    │ 🧠 memory: "new since last scan"
+🔭 scanner ─▶ 🎯 grader ─▶ ✋ triage ─▶ 🗺️ planner ─▶ ✋ decisions ─▶ 🔀 PR agent ─▶ ✋ approve ─▶ PR / MR (never merged)
+     │ 🧠 memory: "new since last scan"
 ```
 
-## Try it in 30 seconds — no API key
+## Try it in 30 seconds — no key, no cost
 
 ```bash
-pip install git+https://github.com/<you>/migration-control   # PyPI release: v2
+pipx install git+https://github.com/<owner>/migration-control    # or: pip install … in a venv
 mkdir petclinic && cd petclinic
 mig init --example petclinic
-mig dashboard --offline        # replays real recorded runs: 3 scans, a 7-wave plan, a gated PR
+mig dashboard --offline        # real recorded runs: 3 scans, a 7-wave plan, a gated PR — try the 🎬 Demo button
 ```
 
-## Golden cases: `mig eval`
+## Requirements
 
-Before trusting a changed config (prompts, rubric, policy, model), check it against scans you already trust:
-
-```bash
-mig eval add petclinic-baseline       # derive evals/petclinic-baseline.yaml from the latest satisfied scan — commit it
-mig eval check                        # free: check the latest scan against every case
-mig eval run                          # re-scan each case (isolated, empty memory) and check it — costs a scan per case
-mig eval status                       # did the *current* config pass a full eval?
-```
-
-A case records the refs that were scanned and stable facts from its report — components and their current versions,
-critical alerts, end-of-life flags, lower bounds on critical CVEs and builds — checked with "at least" semantics, so new
-CVEs never fail a case while a lost component or alert does. `mig status` warns when the config changed since the last
-passing eval. Eval re-runs never touch the production memory or the dashboard history.
+- Python ≥ 3.9 and `git`.
+- **Local runner (default):** [Claude Code](https://docs.claude.com/en/docs/claude-code) and a Claude subscription or an
+  API key; Docker for the default per-run isolation.
+- **Managed runner:** an Anthropic API key with credit (Claude Managed Agents).
 
 ## Where the agents run
 
 | `runner` | How | Auth | Code leaves your machine? |
 |---|---|---|---|
 | **`local` + `docker`** (default) | Claude Code headless, one container per run | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, Claude subscription) or `ANTHROPIC_API_KEY` | no (only model traffic) |
-| `local` + `none` | Claude Code headless directly on this machine — no isolation, the agent runs builds without prompts | your normal Claude Code login | no |
+| `local` + `none` | Claude Code headless directly on this machine — no isolation, the agent runs builds without permission prompts | your normal Claude Code login | no |
 | `managed` | Claude Managed Agents API: cloud sandbox, Outcome grader, memory store, scheduled deployment, sessions in the Console | `ANTHROPIC_API_KEY` with API credit | yes (cloned / mounted / uploaded into the sandbox) |
 
-The prompts, rubrics, report schemas and dashboard are identical in all three. Locally, `mig` reproduces the
-managed pieces: an independent grader pass after each attempt (up to `max_iterations`, failed criteria fed back to
-the agent), `.mig/memory/` as the memory store, and `mig schedule install` (cron) instead of a deployment.
-Works the same on a VPS: install Docker + Claude Code, `claude setup-token`, put the token in `.env`.
+Prompts, rubrics, report schemas and the dashboard are identical in all three. Locally, `mig` reproduces the managed
+pieces: an independent grader pass after each attempt (failed criteria fed back to the agent, up to `max_iterations`),
+`.mig/memory/` as the memory store, and cron (`mig schedule install`) instead of a deployment. A run that hits a Claude
+usage limit is paused, not lost: `mig resume <run>`. Works the same on a VPS — Docker + Claude Code + `claude setup-token`.
 
 ## From Claude Code: `/migrate`
 
@@ -59,23 +54,25 @@ Works the same on a VPS: install Docker + Claude Code, `claude setup-token`, put
 mig skill install            # → ~/.claude/skills/migrate   (or --project for ./.claude/skills)
 ```
 
-Then type `/migrate` in Claude Code: it interviews you about your repositories, writes `migration.yaml`, runs
-`mig validate · doctor · up`, and runs scans / plans / PRs only when you say so. Secrets never go through the chat.
+Type `/migrate` in Claude Code: it interviews you about your repositories, writes `migration.yaml`, runs
+`mig validate · doctor · up`, and starts scans, plans and PRs only when you say so. Secrets never go through the chat.
 
 ## Run it on your estate
 
 ```bash
-mkdir my-estate && cd my-estate      # a small "control" repo, separate from your app repos
-mig init                             # asks for your repos → writes migration.yaml
-claude setup-token                   # local runner in Docker: put CLAUDE_CODE_OAUTH_TOKEN=... in .env (gitignored)
-export GITHUB_TOKEN=... GITLAB_TOKEN=...   # only for private repos (read access is enough)
-mig doctor                           # key, API, tokens, repo access
-mig up                               # local: builds the sandbox image · managed: environment, skill, memory store, agents, deployment
-mig scan                             # start a scan now
+mkdir my-estate && cd my-estate      # a small "control" folder/repo, separate from your app repos
+mig init                             # asks for your repos → writes migration.yaml (+ .gitignore)
+claude setup-token                   # in your own terminal; put CLAUDE_CODE_OAUTH_TOKEN=… in .env (gitignored)
+export GITHUB_TOKEN=… GITLAB_TOKEN=… # only for private repos (read is enough to scan; write to publish PRs)
+mig doctor                           # Docker, Claude auth, tokens, repository access
+mig up                               # local: builds the sandbox image · managed: creates/updates the workspace objects
+mig scan                             # runs in the background — `mig status`
 mig dashboard --serve                # http://127.0.0.1:8765 — follow it live
-mig plan                             # once the scan is graded: build the migration plan
-mig pr 4                             # prepare the PR/MR for wave 4 — then approve it in the dashboard (or `mig approve <run>`)
+mig plan                             # from the latest graded scan
+mig pr 4                             # prepare wave 4's PR/MR — review and approve it in the wave's drawer
 ```
+
+Runs are on demand; nothing is scheduled unless you add `schedule:` and run `mig schedule install`.
 
 ## From a wave to a pull request
 
@@ -86,24 +83,36 @@ other run. **It has no write credential.** You review the diff, gates and descri
 Only then does `mig`, on your machine, push branch `migration/wave-<n>-…` and open one pull request (GitHub) or merge
 request (GitLab) per repository with your token. Nothing is ever merged.
 
-To publish, a module needs `token_env` with **write** access (GitHub fine-grained: Contents + Pull requests read/write;
-GitLab: `api` or `write_repository`) and a branch to target (`ref` if it is a branch, otherwise `base_branch`).
-Local-path modules get a patch to apply yourself.
+A module is published when it has `token_env` with **write** access (GitHub fine-grained: Contents + Pull requests
+read/write; GitLab: `api`) and a branch to target (`ref` if it is a branch, otherwise `base_branch`). Local paths and
+repos without `token_env` (e.g. upstream projects you cannot write to) get a patch to apply yourself.
 
-`mig up` is idempotent: change `migration.yaml` and run it again. With the managed runner, agents get a new
-version and the deployment gets the new kickoff. Everything created is recorded in `.mig/state.json`.
-Local runs start in the background (`mig stop <run>` to stop one); add `--foreground` for cron / CI.
+## Golden cases: `mig eval`
+
+Before trusting a changed config (prompts, rubric, policy, model), check it against scans you already trust:
+
+```bash
+mig eval add my-baseline       # derive evals/my-baseline.yaml from the latest satisfied scan — review it, commit it
+mig eval check                 # free: check the latest scan against every case
+mig eval run                   # re-scan each case (isolated, empty memory) and check it — costs a scan per case
+mig eval status                # did the *current* config pass a full eval?
+```
+
+A case records the refs that were scanned and stable facts from its report — components and their current versions,
+critical alerts, end-of-life flags, lower bounds on critical CVEs and builds — checked with "at least" semantics: new CVEs
+never fail a case, a lost component or alert does. `mig status` warns when the config changed since the last passing eval.
 
 ## migration.yaml
 
 ```yaml
 version: 1
-project: acme                         # names the agents, environment and memory store
+project: acme
+runner: {type: local, isolation: docker}
 estate:
   - name: billing-api
     repo: https://github.com/acme/billing-api.git
     ref: main                         # branch, tag or commit = "what runs in production"
-    token_env: GITHUB_TOKEN           # private repo; omit for public ones
+    token_env: GITHUB_TOKEN           # private repo / publishing PRs; omit for public ones
     depends_on: [ledger-db]           # → the grader checks this constraint is analysed
   - name: web
     repo: https://gitlab.com/acme/web
@@ -116,12 +125,12 @@ policy:
   approvers: [tech-lead, security, platform-ops]
   rules: ["Never recommend a non-LTS Java release."]
 sandbox:
-  packages: { apt: [openjdk-17-jdk, maven] }   # pre-installed, cached across runs
+  packages: { apt: [openjdk-17-jdk, maven] }   # baked into the sandbox image
 agents:
   model: auto                         # newest Opus-class model, or an exact model id
   max_iterations: 3                   # grader retries
-  budget_usd: 25                      # optional per-run spend cap
-schedule:                             # optional — omit for manual runs only
+  budget_usd: 25                      # optional per-run cap (API billing only)
+schedule:                             # optional — omit for on-demand runs only
   cron: "0 6 * * 6"
   timezone: Europe/Paris
 ```
@@ -142,14 +151,13 @@ local path), mounts it at `/workspace` and deletes it after the run. Tokens neve
 | private GitHub | **mount** — `github_repository` session resource | ✅ | Anthropic API, as the repository's authorization token |
 | private GitLab, local path | **upload** — `mig` snapshots locally, Files API | ⚠️ snapshot from the last `mig up` | stays on your machine |
 
-For uploaded modules on a schedule, re-run `mig up` (for example from your CI) to refresh the snapshot.
+## What you get
 
-## What you get per scan
-
-`impact-summary.md` (one page for approvers) · `impact-report.md` · `impact-report.json`
-([schema 1.0](migration_control/resources/schemas/impact-report.schema.json), validated by the agent and
-the grader) · `impact-report.xlsx` (auditors). Per plan: `migration-plan.{md,json}`, a one-page summary,
-the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downloads everything.
+Per scan: `impact-summary.md` (one page for approvers) · `impact-report.md` · `impact-report.json`
+([schema 1.0](migration_control/resources/schemas/impact-report.schema.json), validated by the agent and the grader) ·
+`impact-report.xlsx` (auditors). Per plan: `migration-plan.{md,json}`, a one-page summary, the proven wave's `.patch`
+and its evidence logs. Per PR run: one `.patch` per module, `pr.json`, `pr-description.md`, gate logs.
+`mig outputs <run>` copies everything into `./outputs/<run>/`.
 
 ## Commands
 
@@ -157,29 +165,35 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 |---|---|
 | `mig init [--example petclinic]` | write `migration.yaml` (interactive) or copy an example |
 | `mig validate` | check the config, render prompts to `.mig/rendered/` |
-| `mig doctor` | key, API, tokens, repository access |
-| `mig up` | create / update everything in your Anthropic workspace |
-| `mig scan [--wait]` · `mig plan [--scan ID] [--wait]` | start runs |
+| `mig doctor` | Docker / Claude auth / API key, tokens, repository access |
+| `mig up` | local: build the sandbox image · managed: create/update the workspace objects |
+| `mig scan` · `mig plan [--scan RUN]` | start runs (background; `--foreground` for cron/CI) |
 | `mig pr <wave>` · `mig approve <run>` · `mig deny <run>` | prepare a wave's PR/MR · publish it · reject it |
 | `mig stop <run>` · `mig resume <run>` | stop a local run · resume one paused by a Claude usage limit |
-| `mig schedule install\|remove` (local) · `mig run-now` · `mig schedule pause\|unpause` (managed) | scheduling |
-| `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
-| `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
-| `mig skill install [--project]` | install the `/migrate` Claude Code skill |
 | `mig eval add\|check\|run\|status` | golden cases for the scanner |
+| `mig status` · `mig outputs [RUN]` | runs, grader verdicts, cost, evals · copy outputs |
+| `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
+| `mig schedule install\|remove` (local) · `pause\|unpause` + `mig run-now` (managed) | scheduling |
+| `mig skill install [--project]` | install the `/migrate` Claude Code skill |
 
 ## Safety model
 
-- Agents never push or open PRs: none of them gets a write credential. PRs/MRs are opened by `mig` on your machine, only after you approve the prepared diff, and never merged.
-- The dashboard server only accepts actions carrying a per-start secret embedded in the page it serves (and same-origin requests), so other websites cannot trigger approvals on `127.0.0.1`.
-- Every version, CVE and end-of-life claim needs an official source or is tagged `UNVERIFIED` (the bundled `regulated-sourcing` skill).
-- Your API key and tokens are never written by `mig` — not to `.mig/`, not into prompts, not into the dashboard page, not on a `docker run` command line. The dashboard server listens on `127.0.0.1` only.
-- Local runs use `bypassPermissions`: keep `isolation: docker` unless you accept the agent running builds and shell commands directly on your machine.
-- Scans are not free: on the API a full scan of a mid-size estate is a few dollars, heavy estates more; on a Claude subscription a heavy scan uses a large share of your usage window. `mig status` shows the cost of the last runs; `agents.budget_usd` caps a run (API billing).
+- Agents never push or open PRs: none of them gets a write credential. PRs/MRs are opened by `mig` on your machine, only
+  after you approve the prepared diff, and never merged.
+- Your keys and tokens are never written by `mig` — not to `.mig/`, prompts, logs or the dashboard page — and never appear
+  on a command line (containers get them by variable name; git uses `GIT_ASKPASS`).
+- The dashboard listens on `127.0.0.1` only, and every action needs a per-start secret embedded in the page it serves plus
+  a same-origin request, so other websites cannot trigger approvals.
+- Local runs use Claude Code's `bypassPermissions` mode: keep `isolation: docker` unless you accept the agent running
+  builds and shell commands directly on your machine.
+- Every version, CVE and end-of-life claim needs an official source or is tagged `UNVERIFIED` (the bundled
+  `regulated-sourcing` skill). Still: these are agent findings for humans to review, not an authority.
+- Runs are not free. A heavy estate (the petclinic example: 3 modules, ~180 components, real builds) took ~45 min and the
+  equivalent of ~$20 at API list prices for a scan with one fix iteration, ~$5 for its plan and ~$2 for a PR. On a Claude
+  subscription that is a large share of a usage window. `mig status` shows the cost of every run.
 
-## Roadmap
-
-See [docs/ROADMAP.md](docs/ROADMAP.md).
+See [SECURITY.md](SECURITY.md) to report a vulnerability, [CONTRIBUTING.md](CONTRIBUTING.md) to hack on it,
+[CHANGELOG.md](CHANGELOG.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

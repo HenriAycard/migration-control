@@ -52,7 +52,8 @@ def cmd_init(a):
             st.set("example", value=a.example)
         _write_gitignore(root)
         _say(f"✓ {a.example} example copied. Look around with no API key at all:\n    mig dashboard --offline")
-        _say("  When you want to run it for real: export ANTHROPIC_API_KEY, then `mig doctor && mig up && mig scan`.")
+        _say("  To run it for real on your Claude subscription: `claude setup-token`, put CLAUDE_CODE_OAUTH_TOKEN=… in .env\n"
+             "  (or set runner.isolation: none to use your Claude Code login), then `mig doctor && mig up && mig scan`.")
         return
     _say("Describe the estate: every repository you migrate together.\n")
     project = _ask("Project name (kebab-case)", root.name.lower().replace("_", "-").replace(" ", "-"))

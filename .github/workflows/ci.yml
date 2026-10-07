@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests · py${{ matrix.python }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+
+  package:
+    name: build + install smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - name: Install the wheel in a clean venv and run the no-key quickstart
+        run: |
+          python -m venv /tmp/venv
+          /tmp/venv/bin/pip install dist/*.whl
+          mkdir /tmp/demo && cd /tmp/demo
+          /tmp/venv/bin/mig --version
+          /tmp/venv/bin/mig init --example petclinic
+          /tmp/venv/bin/mig validate
+          /tmp/venv/bin/mig dashboard --offline --no-open
+          test -s .mig/dashboard/index.html
+          /tmp/venv/bin/mig skill install --project
+          test -f .claude/skills/migrate/SKILL.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

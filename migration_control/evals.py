@@ -12,7 +12,6 @@ Facts are checked with "at least" semantics — new CVEs or extra findings never
 import json
 import re
 import shutil
-from pathlib import Path
 
 import yaml
 
