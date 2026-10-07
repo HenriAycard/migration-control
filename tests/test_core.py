@@ -103,3 +103,10 @@ def test_dashboard_builds_offline_from_example(tmp_path):
     assert data["rubrics"]["scanner"] and data["rubrics"]["planner"]
     page = dashboard.build(cfg, st, None, log=lambda *_: None).read_text()
     assert "/*__DATA__*/null" not in page
+
+
+def test_claude_skill_is_packaged_with_valid_frontmatter():
+    text = (RESOURCES / "claude-skill" / "migrate" / "SKILL.md").read_text()
+    head = yaml.safe_load(text.split("---")[1])
+    assert head["name"] == "migrate" and "migration.yaml" in head["description"]
+    assert "never `Read`/`cat` a `.env`" in text   # secrets never transit the chat

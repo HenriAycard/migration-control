@@ -274,6 +274,18 @@ def cmd_deny(a):
     publish.decide(cfg, st, a.run, False, a.reason or "", log=_say)
 
 
+def cmd_skill(a):
+    src = RESOURCES / "claude-skill" / "migrate"
+    dst = (Path.cwd() / ".claude" / "skills" / "migrate") if a.project else (Path.home() / ".claude" / "skills" / "migrate")
+    if dst.exists() and not a.force:
+        same = all((dst / f.name).exists() and (dst / f.name).read_bytes() == f.read_bytes() for f in src.iterdir())
+        if same:
+            return _say(f"✓ {dst} is already up to date")
+        sys.exit(f"{dst} exists and differs — re-run with --force to overwrite it")
+    shutil.copytree(src, dst, dirs_exist_ok=True)
+    _say(f"✓ installed the Claude Code skill → {dst}\n  In Claude Code: /migrate")
+
+
 def cmd_worker(a):
     cfg, st, _ = _ctx(need_client=False)
     local.work(cfg, st, a.kind, a.run)
@@ -427,6 +439,11 @@ def main(argv=None):
     s.add_argument("run")
     s.add_argument("--reason", default="")
     s.set_defaults(fn=cmd_deny)
+    s = sub.add_parser("skill", help="install the /migrate Claude Code skill")
+    s.add_argument("action", choices=["install"])
+    s.add_argument("--project", action="store_true", help="install in ./.claude/skills instead of ~/.claude/skills")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(fn=cmd_skill)
     s = sub.add_parser("_worker")  # internal: detached local run
     s.add_argument("kind", choices=["scans", "plans", "prs"])
     s.add_argument("run")

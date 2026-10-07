@@ -36,6 +36,15 @@ managed pieces: an independent grader pass after each attempt (up to `max_iterat
 the agent), `.mig/memory/` as the memory store, and `mig schedule install` (cron) instead of a deployment.
 Works the same on a VPS: install Docker + Claude Code, `claude setup-token`, put the token in `.env`.
 
+## From Claude Code: `/migrate`
+
+```bash
+mig skill install            # → ~/.claude/skills/migrate   (or --project for ./.claude/skills)
+```
+
+Then type `/migrate` in Claude Code: it interviews you about your repositories, writes `migration.yaml`, runs
+`mig validate · doctor · up`, and runs scans / plans / PRs only when you say so. Secrets never go through the chat.
+
 ## Run it on your estate
 
 ```bash
@@ -139,6 +148,7 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 | `mig schedule install\|remove` (local) · `mig run-now` · `mig schedule pause\|unpause` (managed) | scheduling |
 | `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
 | `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
+| `mig skill install [--project]` | install the `/migrate` Claude Code skill |
 
 ## Safety model
 

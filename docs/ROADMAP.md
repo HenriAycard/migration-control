@@ -42,7 +42,8 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   Dashboard POSTs need a per-start secret + same origin. Verified with a fake agent, a local bare repo and a fake GitHub API
   (tests/test_pr.py + a browser walk-through). Not yet against real GitHub / GitLab.
 - Still open: `mig pr` on the managed runner; optional mode where the agent opens the PR itself via the GitHub MCP server.
-- **Claude Code skill `/migrate`**: interview → writes `migration.yaml` → `mig doctor && mig up && mig scan`.
+- ✅ **Claude Code skill `/migrate`** (`mig skill install`): interview → `migration.yaml` → `mig validate · doctor · up`; runs only on the
+  user's go-ahead; secrets never through the chat. Packaged + frontmatter tested; not yet exercised in a live interview.
 - **`mig eval`**: replay golden cases against a new agent version before promoting it to the deployment.
 - Demo mode for any project (today it only plays the bundled petclinic recording).
 - Approvals relay in the dashboard for any `requires_action` session.
