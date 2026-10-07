@@ -40,7 +40,10 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   wave drawer (diff, gates, description) → ✅ Approve & publish / ✋ Deny, or `mig approve|deny`; `mig` pushes `migration/wave-<n>-…`
   and opens a GitHub PR / GitLab MR per repo with the local token (askpass, never in argv); partial publishes resume; never merges.
   Dashboard POSTs need a per-start secret + same origin. Verified with a fake agent, a local bare repo and a fake GitHub API
-  (tests/test_pr.py + a browser walk-through). Not yet against real GitHub / GitLab.
+  (tests/test_pr.py + a browser walk-through), then **for real on GitHub (2026-10-07)**: wave 4 of the petclinic plan prepared in
+  Docker (grader `satisfied`, 8 gates PASS, 3 left for rollout, ~$1.78 equivalent), approved in the dashboard → private repo got
+  branch `migration/wave-4-…` (1 commit on `main`'s head, 1 file +3/−3) and an open, unmerged PR with the approver-ready body.
+  Not yet against real GitLab. Commit author falls back to "migration-control" when no global git identity is set.
 - Still open: `mig pr` on the managed runner; optional mode where the agent opens the PR itself via the GitHub MCP server.
 - ✅ **Claude Code skill `/migrate`** (`mig skill install`): interview → `migration.yaml` → `mig validate · doctor · up`; runs only on the
   user's go-ahead; secrets never through the chat. Packaged + frontmatter tested; not yet exercised in a live interview.
