@@ -73,16 +73,19 @@ def check(cfg, pr):
         m = cfg.module(entry["module"])
         if "repo" not in m:
             problems[m.name] = "local path module — no remote to publish to; apply the patch yourself"
-        elif not m.get("token_env") or not os.environ.get(m["token_env"]):
-            problems[m.name] = f"needs a token with write access in {m.get('token_env') or 'token_env (not configured)'}"
+        elif not m.get("token_env"):
+            problems[m.name] = "no token_env configured — patch only (e.g. an upstream repo you cannot write to)"
+        elif not os.environ.get(m["token_env"]):
+            problems[m.name] = f"needs a token with write access in {m['token_env']}"
         elif not base_branch(m):
             problems[m.name] = f"ref {m.ref} is not a branch — set base_branch for this module in migration.yaml"
     return problems
 
 
 def blocking(cfg, problems):
-    """Problems the user must fix before approving (a repo we could publish to) — local paths are just patch-only."""
-    return {k: v for k, v in problems.items() if "repo" in cfg.module(k)}
+    """Problems the user must fix before approving: a repo configured for publishing (token_env set) that cannot be
+    published right now. Local paths and repos without token_env are simply patch-only."""
+    return {k: v for k, v in problems.items() if "repo" in cfg.module(k) and cfg.module(k).get("token_env")}
 
 
 def publish(cfg, run_dir, log=print, results=None):

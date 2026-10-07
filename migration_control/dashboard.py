@@ -422,10 +422,15 @@ def serve(cfg, st, client, port=8765, log=print):
             self.send_error(404)
 
         def log_message(self, fmt, *args):
-            if "/api/live" not in (args[0] if args else ""):
+            if "/api/live" not in str(args[0] if args else ""):
                 super().log_message(fmt, *args)
 
-    srv = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(out_dir(st))))
+    try:
+        srv = ThreadingHTTPServer(("127.0.0.1", port), partial(Handler, directory=str(out_dir(st))))
+    except OSError as e:
+        if e.errno in (48, 98):   # EADDRINUSE (macOS, Linux)
+            raise RuntimeError(f"port {port} is already in use — pick another one with --port {port + 1}") from None
+        raise
     log(f"Migration Control → http://127.0.0.1:{port}  (live feed on; Ctrl-C to stop)")
     try:
         srv.serve_forever()

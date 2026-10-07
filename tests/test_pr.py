@@ -134,3 +134,11 @@ def test_unknown_wave_is_rejected(project):
     cfg, st, *_ = project
     with pytest.raises(RuntimeError, match="no wave 9"):
         local.prepare(cfg, st, "prs", log=lambda *_: None, plan_run="plan-1", wave=9)
+
+
+def test_repo_without_token_env_is_patch_only_not_blocking(project, monkeypatch, tmp_path):
+    cfg, st, bare, opened, _ = project
+    cfg["estate"][0].pop("token_env")
+    pr = {"modules": [{"module": "infra"}]}
+    problems = publish.check(cfg, pr)
+    assert "patch only" in problems["infra"] and publish.blocking(cfg, problems) == {}
