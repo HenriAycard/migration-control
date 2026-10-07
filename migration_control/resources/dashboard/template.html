@@ -886,7 +886,7 @@ async function pollLive() {
     if (run) {
       if (!live.active) { pause(); resetRun(); live.active = true; go("flow"); toast(`🔴 Live — the ${esc(run.role)} is running, following it now`); }
       pill.innerHTML = `<span class="dot live"></span><span>LIVE · ${esc(run.role)} · ${Math.round((run.active_seconds || 0) / 60)} min</span>`;
-      $("#flowState").innerHTML = `<span class="dot live"></span> Live · <a href="${esc(run.console)}" target="_blank" rel="noopener">${esc(run.session.slice(0, 16))}…</a>`;
+      $("#flowState").innerHTML = `<span class="dot live"></span> Live · ${run.console ? `<a href="${esc(run.console)}" target="_blank" rel="noopener">${esc(run.session.slice(0, 16))}…</a>` : esc(run.session)}`;
       flowEls[run.role].g.classList.add("active"); idleWires(false);
       const seen = live.seen[run.session] || 0, items = run.timeline || [];
       if (!seen && items.length > 20) { replay.fast = true; items.slice(0, -20).forEach(ev => handle(ev, run.role)); replay.fast = false; live.seen[run.session] = items.length - 20; }
@@ -1008,7 +1008,7 @@ function renderJourney() {
     <div class="jstat">${ring([{ v: covered - unc, c: "var(--st-good)" }, { v: unc, c: "var(--st-critical)" }], 46, 6)}<div><b>${covered - unc}/${covered}</b><span>outdated components covered</span></div></div>
     <div class="jstat">${ring([{ v: pp, c: "var(--st-good)" }, { v: proof.length - pp, c: "var(--st-critical)" }], 46, 6)}<div><b>${pp}/${proof.length}</b><span>wave ${esc(p.proof.wave)} proof steps passed</span></div></div>
     <div class="jstat">${ring([{ v: 1, c: p.grader === "satisfied" ? "var(--st-good)" : "var(--st-warning)" }], 46, 6)}<div><b>${esc(p.grader || "n/a")}</b><span>planner Outcome</span></div></div>`;
-  $("#jlinks").innerHTML = `${p.patches.map(x => `<a class="btn primary" href="${esc(x)}" download>⬇ ${esc(x.split("/").pop())}</a>`).join("")} <a class="btn" href="${esc(p.console)}" target="_blank" rel="noopener">Planner session ↗</a>`;
+  $("#jlinks").innerHTML = `${p.patches.map(x => `<a class="btn primary" href="${esc(x)}" download>⬇ ${esc(x.split("/").pop())}</a>`).join("")}${p.console ? ` <a class="btn" href="${esc(p.console)}" target="_blank" rel="noopener">Planner session ↗</a>` : ""}`;
   const defs = svg("defs", {}, root);
   defs.innerHTML = `<linearGradient id="lineG" x1="0" x2="1"><stop offset="0" stop-color="${css("--mod-rest")}"/><stop offset=".5" stop-color="${css("--mod-infra")}"/><stop offset="1" stop-color="${css("--mod-angular")}"/></linearGradient>`;
   const d = `M${x0 - 50},${ly} ` + xs.map((x, i) => `L${x},${yOf(i)}`).join(" ") + ` L${x1 + 50},${ly}`;

@@ -20,6 +20,9 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   subscription (2026-10-06)**: 44.5 min active, grader `needs_revision` (incomplete inventory) → fix via `--resume` → `satisfied`;
   184 components, 749 unique production CVEs, 8 builds attempted, report valid against schema 1.0, xlsx produced, memory written.
   Equivalent API list cost reported by Claude Code: ~$21.65 for the two iterations.
+- **Real local planner run (2026-10-07)**: first attempt hit the subscription session limit (→ the pause/resume work below);
+  re-run: 18 min active, grader `satisfied` first pass, 10 waves, 44/44 outdated components covered, 10 blocking decisions,
+  wave 4 (ojdbc6 → ojdbc8) proven — `wave-4.patch` re-checked with `git apply --check` on a fresh checkout. ~$5.13 equivalent.
 - Usage limits (subscription): a run that hits one is checkpointed as `paused` (workspace + conversation kept) and
   `mig resume <run>` continues the same conversation, or re-runs only the grader if that is where it stopped.
 - Not yet run for real: `isolation: none`, cron scheduling.
