@@ -221,6 +221,11 @@ class Timeline:
     def __init__(self, path, t0, unmap=None):
         self.path, self.t0, self.items, self.errs, self.last_flush = path, t0, [], {}, 0
         self.unmap = sorted((unmap or {}).items(), key=lambda kv: -len(kv[0]))   # host path → sandbox path
+        if path.exists():   # resuming a paused run: continue its timeline
+            try:
+                self.items = json.loads(path.read_text())
+            except ValueError:
+                self.items = []
 
     def _sandbox_paths(self, obj):
         s = json.dumps(obj)
@@ -266,8 +271,8 @@ class Timeline:
         out = []
         for it in self.items:
             it = dict(it)
-            if it["k"] == "tool":
-                it["err"] = self.errs.get(it.pop("id", None), False)
+            if it["k"] == "tool" and "id" in it:
+                it["err"] = self.errs.get(it.pop("id"), False)
             out.append(it)
         self.path.write_text(json.dumps(out))
         self.last_flush = time.time()
@@ -323,8 +328,29 @@ def _run_claude(cfg, st, rid, args, prompt, host, on_event=None):
             on_event(e)
     p.wait()
     if result is None:
-        raise RuntimeError(f"claude exited with code {p.returncode}: {p.stderr.read()[-800:]}")
+        err = p.stderr.read()[-800:]
+        if _is_limit(err):
+            raise UsageLimit(err.strip())
+        raise RuntimeError(f"claude exited with code {p.returncode}: {err}")
+    if result.get("is_error"):
+        text = str(result.get("result") or result.get("subtype") or "")
+        if _is_limit(text) or result.get("api_error_status") == 429:
+            raise UsageLimit(text.strip(), result)
+        raise RuntimeError(f"claude reported an error: {text[:500]}")
     return result
+
+
+class UsageLimit(Exception):
+    """Claude subscription / rate limit reached — the run is paused and can be resumed."""
+
+    def __init__(self, message, result=None):
+        super().__init__(message)
+        self.result = result or {}
+
+
+def _is_limit(text):
+    t = (text or "").lower()
+    return any(k in t for k in ("usage limit", "session limit", "hit your limit", "rate limit", "rate_limit", "resets "))
 
 
 def _grade(cfg, st, rid, host, task, rubric, loc):
@@ -345,7 +371,11 @@ def _grade(cfg, st, rid, host, task, rubric, loc):
 
 
 def work(cfg, st, kind, rid):
-    """Agent → grader → (fix → grader)… up to max_iterations. Writes meta/timeline/outputs into the cache."""
+    """Agent → grader → (fix → grader)… up to max_iterations. Writes meta/timeline/outputs into the cache.
+
+    Progress (session, iteration, phase, next prompt, cost) is checkpointed in meta.json, so a run cut by a
+    usage limit is left `paused` with its workspace intact and `mig resume <run>` picks it up where it stopped.
+    """
     d = _kind_dir(st, kind) / rid
     meta = json.loads((d / "meta.json").read_text())
     work_dir, host = _paths(cfg, st, rid)
@@ -355,16 +385,26 @@ def work(cfg, st, kind, rid):
     else:
         system, task, rubric = (render.planner_agent(cfg, "-", "-")["system"], render.planner_task(cfg, meta["scan_session"]),
                                 render.planner_rubric(cfg))
-    sid = str(uuid.uuid4())
-    t0 = time.time()
+    resuming = bool(meta.get("progress"))
+    if resuming and not (work_dir / "workspace").exists():
+        raise RuntimeError(f"{rid} cannot be resumed: its workspace is gone — start a new run")
+    p = meta.get("progress") or {"sid": str(uuid.uuid4()), "it": 1, "phase": "agent", "prompt": loc(task),
+                                  "started": False, "cost": 0.0, "active": 0.0, "verdicts": []}
+    t0 = time.time() if not meta.get("started_at") else datetime.fromisoformat(meta["started_at"].replace("Z", "+00:00")).timestamp()
     unmap = {str(v.resolve()): k for k, v in host.items()} if cfg["runner"]["isolation"] == "none" else {}
     tl = Timeline(d / "timeline.json", t0, unmap)
-    _update_meta(st, kind, rid, status="running", pid=os.getpid(), started_at=now_iso())
-    cost, active, verdicts, explanation = 0.0, 0.0, [], ""
+    if resuming:
+        tl.add({"t": tl.t(), "k": "msg", "text": "▶ resumed after the usage limit"}, force=True)
+    _update_meta(st, kind, rid, status="running", pid=os.getpid(), progress=p, **({} if resuming else {"started_at": now_iso()}))
     max_it = cfg["agents"]["max_iterations"]
     budget = cfg["agents"].get("budget_usd")
     base = ["-p", "--output-format", "stream-json", "--verbose", "--model", model_of(cfg), "--permission-mode", "bypassPermissions",
             "--append-system-prompt", loc(system)]
+
+    def save(**kw):
+        p.update(kw)
+        return _update_meta(st, kind, rid, progress=p, verdicts=p["verdicts"], active_seconds=round(p["active"], 1),
+                            list_cost_cents=round(p["cost"] * 100))
 
     def stop(sig, _frm):
         _update_meta(st, kind, rid, status="terminated", explanation="stopped by user")
@@ -372,45 +412,76 @@ def work(cfg, st, kind, rid):
         sys.exit(130)
     signal.signal(signal.SIGTERM, stop)
 
+    def on_event(e):
+        if e.get("type") == "assistant" and not p["started"]:
+            save(started=True)          # the conversation is on disk: from now on we resume it
+        tl.event(e)
+
     try:
-        prompt = loc(task)
-        for it in range(1, max_it + 1):
-            args = base + (["--session-id", sid] if it == 1 else ["--resume", sid])
-            if budget:
-                args += ["--max-budget-usd", f"{max(0.5, budget - cost):.2f}"]
-            res = _run_claude(cfg, st, rid, args, prompt, host, on_event=tl.event)
-            cost += res.get("total_cost_usd") or 0
-            active += (res.get("duration_ms") or 0) / 1000
-            tl.add({"t": tl.t(), "k": "eval_start", "iteration": it}, force=True)
+        while True:
+            if p["phase"] == "agent":
+                args = base + (["--resume", p["sid"]] if p["started"] else ["--session-id", p["sid"]])
+                if budget:
+                    args += ["--max-budget-usd", f"{max(0.5, budget - p['cost']):.2f}"]
+                res = _run_claude(cfg, st, rid, args, p["prompt"], host, on_event=on_event)
+                save(cost=p["cost"] + (res.get("total_cost_usd") or 0), active=p["active"] + (res.get("duration_ms") or 0) / 1000,
+                     phase="grade")
+            tl.add({"t": tl.t(), "k": "eval_start", "iteration": p["it"]}, force=True)
             g, gres = _grade(cfg, st, rid, host, task, rubric, loc)
-            cost += gres.get("total_cost_usd") or 0
-            active += (gres.get("duration_ms") or 0) / 1000
             failed = [c for c in g.get("criteria", []) if not c.get("met")]
-            result = "satisfied" if not failed else ("max_iterations_reached" if it == max_it else "needs_revision")
+            last = p["it"] >= max_it
+            result = "satisfied" if not failed else ("max_iterations_reached" if last else "needs_revision")
             explanation = ("An independent grader " + ("found all criteria met: " if not failed else f"found {len(failed)} criteria not met: ")
                            + " ".join(f"({c['n']}) {c['note']}" for c in sorted(g.get("criteria", []), key=lambda c: c["n"]))
                            + (f" Summary: {g.get('summary')}" if g.get("summary") else ""))
-            verdicts.append(result)
             tl.add({"t": tl.t(), "k": "eval_end", "result": result, "text": explanation[:400]}, force=True)
-            _update_meta(st, kind, rid, verdicts=verdicts, explanation=explanation, active_seconds=round(active, 1),
-                         list_cost_cents=round(cost * 100))
-            if not failed:
+            save(cost=p["cost"] + (gres.get("total_cost_usd") or 0), active=p["active"] + (gres.get("duration_ms") or 0) / 1000,
+                 verdicts=p["verdicts"] + [result])
+            _update_meta(st, kind, rid, explanation=explanation)
+            if not failed or last:
                 break
-            if it < max_it:
-                prompt = loc("An independent grader checked your outputs against the rubric. These criteria are NOT met:\n"
-                             + "\n".join(f"- ({c['n']}) {c['note']}" for c in failed)
-                             + "\n\nFix every one of them in /mnt/session/outputs/ (re-check the code and sources as needed), then finish.")
+            save(it=p["it"] + 1, phase="agent",
+                 prompt=loc("An independent grader checked your outputs against the rubric. These criteria are NOT met:\n"
+                            + "\n".join(f"- ({c['n']}) {c['note']}" for c in failed)
+                            + "\n\nFix every one of them in /mnt/session/outputs/ (re-check the code and sources as needed), then finish."))
         tl.add({"t": tl.t(), "k": "idle"}, force=True)
         _collect(kind, work_dir, d)
-        _update_meta(st, kind, rid, status="idle", finished_at=now_iso())
+        _update_meta(st, kind, rid, status="idle", finished_at=now_iso(), progress=None)
+    except UsageLimit as e:
+        p["cost"] += e.result.get("total_cost_usd") or 0           # the interrupted call still counts
+        p["active"] += (e.result.get("duration_ms") or 0) / 1000
+        if p["phase"] == "agent" and p["started"]:
+            p["prompt"] = "You were interrupted by a usage limit. Continue the task exactly where you stopped and finish it."
+        elif p["phase"] == "agent":
+            p["sid"] = str(uuid.uuid4())   # nothing was recorded: start the conversation afresh on resume
+        tl.add({"t": tl.t(), "k": "msg", "text": f"⏸ paused: Claude usage limit ({str(e)[:120]})"}, force=True)
+        _update_meta(st, kind, rid, status="paused", progress=p, list_cost_cents=round(p["cost"] * 100),
+                     active_seconds=round(p["active"], 1),
+                     explanation=f"Claude usage limit reached ({str(e)[:200]}). Run `mig resume {rid}` once it resets.")
+        return "paused"
     except Exception as e:  # keep a readable trace in the dashboard
         tl.flush(force=True)
         _update_meta(st, kind, rid, status="terminated", explanation=f"run failed: {e}"[:2000])
+        _cleanup(work_dir)
         raise
-    finally:
-        for sub in ("workspace", "home"):
-            shutil.rmtree(work_dir / sub, ignore_errors=True)
-    return verdicts[-1] if verdicts else None
+    _cleanup(work_dir)
+    return p["verdicts"][-1] if p["verdicts"] else None
+
+
+def _cleanup(work_dir):
+    for sub in ("workspace", "home"):
+        shutil.rmtree(work_dir / sub, ignore_errors=True)
+
+
+def resume(cfg, st, rid, foreground=False):
+    for kind in ("scans", "plans"):
+        mp = _kind_dir(st, kind) / rid / "meta.json"
+        if mp.exists():
+            m = json.loads(mp.read_text())
+            if m.get("status") != "paused":
+                raise RuntimeError(f"{rid} is {m.get('status')}, not paused")
+            return kind, start(cfg, st, kind, rid, foreground=foreground)
+    raise RuntimeError(f"no local run {rid}")
 
 
 def _collect(kind, work_dir, d):

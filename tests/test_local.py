@@ -19,7 +19,13 @@ state = os.path.join(os.environ["FAKE_STATE"], "calls")
 n = int(open(state).read()) if os.path.exists(state) else 0
 open(state, "w").write(str(n + 1))
 emit = lambda e: print(json.dumps(e), flush=True)
+open(os.path.join(os.environ["FAKE_STATE"], "argv.log"), "a").write(" ".join(a for a in args if a.startswith("--")) + "\n")
 emit({"type": "system", "subtype": "init", "session_id": "s"})
+if os.environ.get("FAKE_LIMIT_AT") == str(n):
+    emit({"type": "assistant", "message": {"content": [{"type": "text", "text": "working..."}]}})
+    emit({"type": "result", "subtype": "success", "is_error": True, "result": "You've hit your session limit · resets 12:40am (UTC)",
+          "total_cost_usd": 0.2, "duration_ms": 5000, "session_id": "a"})
+    sys.exit(1)
 if "--json-schema" in args:
     met = n >= 3   # calls: 0 agent, 1 grader (fail), 2 agent fix, 3 grader (pass)
     emit({"type": "result", "subtype": "success", "total_cost_usd": 0.01, "duration_ms": 1000, "session_id": "g",
@@ -93,3 +99,38 @@ def test_timeline_maps_claude_code_events(tmp_path):
     items = json.loads((tmp_path / "t.json").read_text())
     assert items[0]["tool"] == "web_search" and items[0]["phase"] == "research" and items[0]["err"] is True
     assert items[1]["phase"] == "skill" and items[1]["skill"] == "regulated-sourcing"
+
+
+def test_usage_limit_pauses_then_resume_finishes(tmp_path, monkeypatch):
+    from migration_control import RESOURCES
+    pet = RESOURCES / "examples" / "petclinic"
+    report = next((pet / "recorded" / "scans").glob("*/impact-report.json"))
+    bindir = tmp_path / "bin"; bindir.mkdir()
+    fake = bindir / "claude"; fake.write_text(FAKE_CLAUDE); fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("FAKE_STATE", str(tmp_path)); monkeypatch.setenv("FAKE_REPORT", str(report))
+    monkeypatch.setenv("FAKE_LIMIT_AT", "0")       # the very first agent call hits the limit
+    proj = tmp_path / "proj"; (proj / "infra").mkdir(parents=True)
+    (proj / "infra" / "requirements.txt").write_text("requests==2.19.0\n")
+    (proj / "migration.yaml").write_text(yaml.safe_dump({
+        "version": 1, "project": "demo", "runner": {"type": "local", "isolation": "none"},
+        "estate": [{"name": "petclinic-infra", "path": "infra"}], "agents": {"max_iterations": 3, "planner": False}}))
+    cfg = config.load(proj); st = State(proj)
+    rid = local.prepare(cfg, st, "scans", log=lambda *_: None)
+
+    assert local.work(cfg, st, "scans", rid) == "paused"
+    d = st.cache / "scans" / rid
+    meta = json.loads((d / "meta.json").read_text())
+    assert meta["status"] == "paused" and meta["progress"]["started"] and f"mig resume {rid}" in meta["explanation"]
+    assert (st.dir / "work" / rid / "workspace").exists()            # kept for the resume
+
+    monkeypatch.delenv("FAKE_LIMIT_AT")
+    assert local.work(cfg, st, "scans", rid) == "satisfied"
+    meta = json.loads((d / "meta.json").read_text())
+    assert meta["status"] == "idle" and meta["progress"] is None
+    assert meta["verdicts"] == ["needs_revision", "satisfied"] and meta["list_cost_cents"] == 122
+    argv = (tmp_path / "argv.log").read_text().splitlines()
+    assert "--session-id" in argv[0] and "--resume" in argv[1]       # same conversation continued
+    msgs = [i["text"] for i in json.loads((d / "timeline.json").read_text()) if i["k"] == "msg"]
+    assert any("paused" in m for m in msgs) and any("resumed" in m for m in msgs)
+    assert not (st.dir / "work" / rid / "workspace").exists()

@@ -20,7 +20,9 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   subscription (2026-10-06)**: 44.5 min active, grader `needs_revision` (incomplete inventory) → fix via `--resume` → `satisfied`;
   184 components, 749 unique production CVEs, 8 builds attempted, report valid against schema 1.0, xlsx produced, memory written.
   Equivalent API list cost reported by Claude Code: ~$21.65 for the two iterations.
-- Not yet run for real: the local planner, `isolation: none`, cron scheduling.
+- Usage limits (subscription): a run that hits one is checkpointed as `paused` (workspace + conversation kept) and
+  `mig resume <run>` continues the same conversation, or re-runs only the grader if that is where it stopped.
+- Not yet run for real: `isolation: none`, cron scheduling.
 - Known gaps: cron uses the machine's timezone; on Linux the container runs as the host uid (no passwd entry) — untested.
 
 ### Managed runner — verified against the live API (2026-10-06)

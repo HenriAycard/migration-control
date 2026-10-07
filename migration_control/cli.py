@@ -224,7 +224,10 @@ def _local_start(cfg, st, kind, scan, a):
     if a.wait or getattr(a, "foreground", False):
         _say(f"▶ {rid} running in the foreground…")
         verdict = local.start(cfg, st, kind, rid, foreground=True)
-        _say(f"✓ {rid} finished · grader {verdict} — `mig dashboard` to open it")
+        if verdict == "paused":
+            _say(f"⏸ {rid} paused on a Claude usage limit — `mig resume {rid}` once it resets")
+        else:
+            _say(f"✓ {rid} finished · grader {verdict} — `mig dashboard` to open it")
     else:
         pid = local.start(cfg, st, kind, rid)
         _say(f"▶ {rid} started in the background (pid {pid})\n  follow it live: `mig dashboard --serve` · status: `mig status` · stop: `mig stop {rid}`")
@@ -233,6 +236,15 @@ def _local_start(cfg, st, kind, scan, a):
 def cmd_worker(a):
     cfg, st, _ = _ctx(need_client=False)
     local.work(cfg, st, a.kind, a.run)
+
+
+def cmd_resume(a):
+    cfg, st, _ = _ctx(need_client=False)
+    if not cfg.local:
+        sys.exit("managed runner: sessions resume on their own")
+    local.auth_status(cfg)
+    kind, out = local.resume(cfg, st, a.run, foreground=a.foreground)
+    _say(f"✓ {a.run} finished · grader {out}" if a.foreground else f"▶ {a.run} resumed in the background (pid {out}) — `mig status`")
 
 
 def cmd_stop(a):
@@ -353,6 +365,10 @@ def main(argv=None):
     s.add_argument("--wait", action="store_true")
     s.add_argument("--foreground", action="store_true")
     s.set_defaults(fn=cmd_plan)
+    s = sub.add_parser("resume", help="local runner: resume a run paused by a usage limit")
+    s.add_argument("run")
+    s.add_argument("--foreground", action="store_true")
+    s.set_defaults(fn=cmd_resume)
     s = sub.add_parser("stop", help="local runner: stop a running scan or plan")
     s.add_argument("run")
     s.set_defaults(fn=cmd_stop)

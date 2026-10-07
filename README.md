@@ -120,7 +120,7 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 | `mig doctor` | key, API, tokens, repository access |
 | `mig up` | create / update everything in your Anthropic workspace |
 | `mig scan [--wait]` · `mig plan [--scan ID] [--wait]` | start runs |
-| `mig stop <run>` | stop a local run |
+| `mig stop <run>` · `mig resume <run>` | stop a local run · resume one paused by a Claude usage limit |
 | `mig schedule install\|remove` (local) · `mig run-now` · `mig schedule pause\|unpause` (managed) | scheduling |
 | `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
 | `mig dashboard [--serve] [--offline]` | build / serve Migration Control |
