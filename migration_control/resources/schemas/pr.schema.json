@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "pr.json",
+  "description": "What the PR agent prepared for one wave. migration-control publishes it (branch + PR/MR per repository) only after a human approves.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "wave", "title", "branch", "status", "blocked_reason", "modules", "gates", "to_run_at_rollout"],
+  "$defs": {
+    "module": {"type": "string", "description": "Module name from migration.yaml (enum injected at render time)."}
+  },
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "wave": {"type": "integer", "minimum": 1},
+    "title": {"type": "string", "maxLength": 120, "description": "Pull request title, e.g. 'Wave 4: Oracle JDBC driver ojdbc6 11.2 -> ojdbc8 23.x'"},
+    "branch": {"type": "string", "pattern": "^migration/[a-z0-9][a-z0-9._/-]{2,80}$"},
+    "status": {"enum": ["READY", "BLOCKED"], "description": "READY only if every change is applied and every provable exit gate passed."},
+    "blocked_reason": {"type": ["string", "null"]},
+    "modules": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["module", "patch_file", "commit_message", "files"],
+      "properties": {
+        "module": {"$ref": "#/$defs/module"},
+        "patch_file": {"type": "string", "pattern": "^[a-z0-9-]+\\.patch$", "description": "<module>.patch in /mnt/session/outputs/, paths relative to the module root"},
+        "commit_message": {"type": "string"},
+        "files": {"type": "array", "minItems": 1, "items": {"type": "string"}}}}},
+    "gates": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["id", "check", "command", "result", "evidence"],
+      "properties": {
+        "id": {"type": "string"}, "check": {"type": "string"}, "command": {"type": "string"},
+        "result": {"enum": ["PASS", "FAIL", "NOT_RUN"]},
+        "evidence": {"type": "string", "description": "Quoted real output, or why it was not run"}}}},
+    "to_run_at_rollout": {"type": "array", "items": {"type": "string"}, "description": "Gates that cannot be proven in a sandbox"}
+  }
+}

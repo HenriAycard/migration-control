@@ -107,6 +107,30 @@ def planner_rubric(cfg):
     return (PROMPTS / "planner-rubric.md").read_text()
 
 
+# ── PR agent ─────────────────────────────────────────────────────────────────
+def pr_schema(cfg):
+    s = json.loads((RESOURCES / "schemas" / "pr.schema.json").read_text())
+    s["$defs"]["module"]["enum"] = [m.name for m in cfg.modules]
+    return s
+
+
+def pr_system(cfg):
+    return _tpl("pr-system.md", agent_name=f"{cfg['project']}-pr", project=cfg["project"],
+                approver_list=", ".join(cfg["policy"]["approvers"]), extra_rules=_rules(cfg))
+
+
+def pr_task(cfg, plan_run, wave, has_patch):
+    return _tpl("pr-task.md", plan_run=plan_run, wave=wave, module_setup=setup_text(cfg.modules),
+                patch_line=("/mnt/session/uploads/wave.patch — the planner's proven patch for this wave (paths prefixed by the module name; "
+                            "apply it from /workspace)." if has_patch else
+                            "No proven patch exists for this wave: implement its `changes` from the plan yourself."),
+                schema=_dumps_schema(pr_schema(cfg)))
+
+
+def pr_rubric(cfg):
+    return (PROMPTS / "pr-rubric.md").read_text()
+
+
 # ── shared ───────────────────────────────────────────────────────────────────
 def outcome_event(cfg, task, rubric):
     return {"type": "user.define_outcome", "description": task,

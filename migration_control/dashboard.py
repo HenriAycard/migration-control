@@ -8,12 +8,14 @@ import hashlib
 import html
 import json
 import re
+import secrets
 import threading
+import urllib.parse
 import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
-from . import RESOURCES, local, render, runs
+from . import RESOURCES, local, publish, render, runs
 
 TEMPLATE = RESOURCES / "dashboard" / "template.html"
 
@@ -168,6 +170,30 @@ def load_pr_run(st):
     return run, prs
 
 
+def load_pr_runs(cfg, st):
+    """Local PR runs: prepared change sets awaiting (or past) human review, with their diffs."""
+    base = st.cache / "prs"
+    out = []
+    for mp in sorted(base.glob("*/meta.json")) if base.exists() else []:
+        d, meta = mp.parent, json.loads(mp.read_text())
+        pr = json.loads((d / "pr.json").read_text()) if (d / "pr.json").exists() else None
+        patches = {}
+        for e in (pr or {}).get("modules", []):
+            f = d / e["patch_file"]
+            if f.exists():
+                txt = f.read_text(errors="replace")
+                patches[e["module"]] = txt[:150_000] + ("\n… (truncated)" if len(txt) > 150_000 else "")
+        problems = publish.check(cfg, pr) if pr else {}
+        out.append({"run": meta["id"], "wave": meta.get("wave"), "plan_run": meta.get("plan_run"), "status": meta.get("status"),
+                    "created_at": meta.get("created_at"), "grader": (meta.get("verdicts") or [None])[-1],
+                    "grader_text": meta.get("explanation", ""), "review": meta.get("review") or {}, "pr": pr, "patches": patches,
+                    "publishable": {m: (m not in problems) for m in patches}, "problems": problems,
+                    "description_html": md_to_html((d / "pr-description.md").read_text()) if (d / "pr-description.md").exists() else "",
+                    "timeline": json.loads((d / "timeline.json").read_text()) if (d / "timeline.json").exists() else [],
+                    "active_seconds": meta.get("active_seconds")})
+    return out
+
+
 def parse_rubric(text):
     out = []
     for line in text.splitlines():
@@ -242,11 +268,18 @@ def payload(cfg, st):
     plans.sort(key=lambda p: p["created_at"] or "")
     dep = json.loads((cache / "deployment.json").read_text()) if (cache / "deployment.json").exists() else {}
     pr_run, prs = load_pr_run(st)
+    pr_runs = load_pr_runs(cfg, st) if cfg.local else []
+    for r in pr_runs:   # published PRs/MRs feed the flow's PR node
+        for res in (r["review"].get("published") or []):
+            if res.get("url"):
+                prs.append({"url": res["url"], "number": res["number"], "wave": r["wave"], "session": r["run"], "report": False})
     rubrics = {"scanner": parse_rubric(render.scanner_rubric(cfg))}
     if cfg["agents"]["planner"]:
         rubrics["planner"] = parse_rubric(render.planner_rubric(cfg))
     if (cache / "pr" / "rubric.md").exists():
         rubrics["pr"] = parse_rubric((cache / "pr" / "rubric.md").read_text())
+    elif cfg.local:
+        rubrics["pr"] = parse_rubric(render.pr_rubric(cfg))
     agents = json.loads((cache / "agents.json").read_text()) if (cache / "agents.json").exists() else {}
     return {
         "project": cfg["project"], "workspace": cfg["console_workspace"],
@@ -254,7 +287,8 @@ def payload(cfg, st):
                      "icon": m.get("icon") or "📦", "depends_on": m.get("depends_on", [])} for m in cfg.modules],
         "approvers": cfg["policy"]["approvers"], "schedule_label": schedule_label(cfg, dep),
         "agent_id": st.get("agents", "scanner", "id"), "deployment": dep,
-        "scans": scans, "plans": plans, "prs": prs, "pr_run": pr_run, "rubrics": rubrics, "agents": agents,
+        "scans": scans, "plans": plans, "prs": prs, "pr_run": pr_run, "pr_runs": pr_runs, "rubrics": rubrics, "agents": agents,
+        "local": cfg.local,
         "demo": bool(st.get("example")) and pr_run is not None, "demo_repo": st.get("example_demo_repo"),
     }
 
@@ -318,6 +352,9 @@ def serve(cfg, st, client, port=8765, log=print):
             cache["live"] = (now, val)
         return val
 
+    secret = secrets.token_urlsafe(24)
+    origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+
     class Handler(SimpleHTTPRequestHandler):
         def _json(self, code, obj):
             body = json.dumps(obj).encode()
@@ -328,25 +365,60 @@ def serve(cfg, st, client, port=8765, log=print):
             self.end_headers()
             self.wfile.write(body)
 
+        def _page(self):
+            # the page gets this server's secret; POSTs must echo it (blocks cross-site requests to 127.0.0.1)
+            html_ = (out_dir(st) / "index.html").read_text().replace("<script>\nconst DATA =", f"<script>\nwindow.__MIG_TOKEN = {json.dumps(secret)};\nconst DATA =", 1)
+            body = html_.encode()
+            self.send_response(200)
+            self.send_header("content-type", "text/html; charset=utf-8")
+            self.send_header("cache-control", "no-store")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
-            if self.path.startswith("/api/live"):
+            path = self.path.split("?")[0]
+            if path in ("/", "/index.html"):
+                return self._page()
+            if path.startswith("/api/live"):
                 try:
                     return self._json(200, live())
                 except Exception as e:  # network hiccup: keep the page alive
                     return self._json(502, {"error": str(e)[:200]})
-            if self.path.startswith("/api/demo/"):
-                return self._json(200, {"error": "live GitHub replay is not part of migration-control v0 — the demo plays without it"})
+            if path.startswith("/api/demo/"):
+                return self._json(200, {"error": "live GitHub replay is not part of migration-control — the demo plays without it"})
             return super().do_GET()
 
         def do_POST(self):
-            if self.path.startswith("/api/refresh"):
-                try:
+            origin = self.headers.get("origin")
+            if self.headers.get("x-mig-token") != secret or (origin and origin not in origins):
+                return self._json(403, {"ok": False, "error": "forbidden — reload the page served by `mig dashboard --serve`"})
+            path, _, query = self.path.partition("?")
+            q = urllib.parse.parse_qs(query)
+            try:
+                if path == "/api/refresh":
                     build(cfg, st, client, log=lambda *_: None)
                     return self._json(200, {"ok": True})
-                except Exception as e:
-                    return self._json(500, {"ok": False, "log": str(e)[:2000]})
-            if self.path.startswith("/api/demo/"):
-                return self._json(200, {"ok": False, "error": "live GitHub replay is not part of migration-control v0"})
+                if path == "/api/pr/start" and cfg.local:
+                    plans = [m for m in local.list_runs(st, "plans") if (st.cache / "plans" / m["id"] / "migration-plan.json").exists()]
+                    if not plans:
+                        return self._json(400, {"ok": False, "error": "no finished plan"})
+                    wave = int(q["wave"][0])
+                    rid = local.prepare(cfg, st, "prs", None, log=lambda *_: None, plan_run=plans[-1]["id"], wave=wave)
+                    local.start(cfg, st, "prs", rid)
+                    return self._json(200, {"ok": True, "run": rid})
+                parts = path.strip("/").split("/")   # api/pr/<run>/<approve|deny>
+                if len(parts) == 4 and parts[:2] == ["api", "pr"] and parts[3] in ("approve", "deny"):
+                    length = int(self.headers.get("content-length") or 0)
+                    body = json.loads(self.rfile.read(length) or b"{}") if length else {}
+                    logs = []
+                    review = publish.decide(cfg, st, parts[2], parts[3] == "approve", body.get("reason", ""), log=logs.append)
+                    build(cfg, st, None, log=lambda *_: None)
+                    return self._json(200, {"ok": True, "review": review, "log": logs})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)[:800]})
+            if path.startswith("/api/demo/"):
+                return self._json(200, {"ok": False, "error": "live GitHub replay is not part of migration-control"})
             self.send_error(404)
 
         def log_message(self, fmt, *args):

@@ -333,6 +333,11 @@ body.demo .wrap { padding-bottom: 220px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+.diff { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 420px; overflow: auto; background: var(--panel-2); border-radius: 10px; padding: 10px; white-space: pre; margin: 6px 0 10px; }
+.diff .a { color: var(--good-text); } .diff .r { color: var(--st-critical); } .diff .h { color: var(--accent); } .diff .f { font-weight: 700; color: var(--ink); }
+.prbox { border: 1px solid var(--ring); border-radius: 12px; padding: 12px 14px; margin-top: 8px; background: var(--panel-solid); }
+.prbox textarea { width: 100%; min-height: 54px; margin: 6px 0; border-radius: 8px; border: 1px solid var(--ring); background: var(--panel-2); color: var(--ink); padding: 6px; font: inherit; }
+.chip-pass { color: var(--good-text); font-weight: 700; } .chip-fail { color: var(--st-critical); font-weight: 700; } .chip-skip { color: var(--muted); font-weight: 700; }
 </style>
 </head>
 <body>
@@ -460,6 +465,8 @@ body.demo .wrap { padding-bottom: 220px; }
 
 <script>
 const DATA = /*__DATA__*/null;
+const SERVED = location.protocol.startsWith("http");
+const api = (path, opts = {}) => fetch(path, { ...opts, headers: { ...(opts.headers || {}), "x-mig-token": window.__MIG_TOKEN || "" } });
 const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const fmt = n => (n ?? 0).toLocaleString("en-US");
@@ -661,7 +668,7 @@ function buildFlow() {
   svg("rect", { x: 62, y: 404, width: 76, height: 52, rx: 12, fill: prInfo ? "var(--panel-solid)" : "none", stroke: prInfo ? "var(--st-good)" : "var(--muted)", "stroke-width": prInfo ? 3 : 2, "stroke-dasharray": prInfo ? "" : "5 5" }, pr);
   svg("text", { x: 100, y: 437, "text-anchor": "middle", "font-size": 18 }, pr).textContent = "🔀";
   svg("text", { x: 100, y: 478, class: "node-label" }, root).textContent = prInfo ? `PR #${prInfo.number} · wave ${prInfo.wave}` : "Pull request";
-  svg("text", { x: 100, y: 494, class: "node-sub" }, root).textContent = prInfo ? "open · awaiting approvers ↗" : "v2 · needs Git token";
+  svg("text", { x: 100, y: 494, class: "node-sub" }, root).textContent = prInfo ? "open · awaiting approvers ↗" : (DATA.local ? "mig pr <wave> · you approve" : "local runner only");
   if (prInfo) { pr.onclick = () => open(prInfo.url, "_blank", "noopener"); pr.onkeydown = e => { if (e.key === "Enter") pr.onclick(); }; }
   flowEls.prNode = pr; flowEls.pr = { g: pr, st: {}, cfg: null };
   flowEls.pl = svg("g", {}, root);
@@ -899,7 +906,7 @@ async function pollLive() {
       if (live.active && live.last) {
         live.active = false; flowEls[live.last.role].g.classList.remove("active"); idleWires(true); $("#flowState").textContent = "⏸ Idle";
         toast(`🏁 The ${esc(live.last.role)} just finished. <button class="btn primary" id="refreshBtn">Refresh data</button>`, 0);
-        $("#refreshBtn").onclick = async () => { toast("⏳ Fetching results…", 0); const rr = await fetch("api/refresh", { method: "POST" }); if (rr.ok) location.reload(); else toast("⚠️ Refresh failed — run `mig dashboard` by hand."); };
+        $("#refreshBtn").onclick = async () => { toast("⏳ Fetching results…", 0); const rr = await api("api/refresh", { method: "POST" }); if (rr.ok) location.reload(); else toast("⚠️ Refresh failed — run `mig dashboard` by hand."); };
       }
     }
   } catch { $("#mode").innerHTML = `<span class="dot"></span><span>Live feed unreachable</span>`; }
@@ -1177,7 +1184,64 @@ function openWave(i) {
     ${(w.changes || []).length ? `<h3>Code changes · ${w.changes.length}</h3><ul>${w.changes.map(x => `<li><code>${esc(x.file)}:${esc(x.line)}</code> — ${esc(x.description)}</li>`).join("")}</ul>` : '<h3>Code changes</h3><p class="empty">Operational wave — no code change.</p>'}
     ${gates("Entry gates", w.entry_gates)}${gates("Exit gates", w.exit_gates)}
     <h3>Rollback</h3><div class="reco">${esc(w.rollback)}</div>
-    ${(w.evidence || []).length ? `<h3>Evidence</h3><p class="mono" style="overflow-wrap:anywhere">${esc(w.evidence.join(", "))}</p>` : ""}`);
+    ${(w.evidence || []).length ? `<h3>Evidence</h3><p class="mono" style="overflow-wrap:anywhere">${esc(w.evidence.join(", "))}</p>` : ""}
+    ${prSection(w)}`);
+  bindPrActions();
+}
+
+/* ── pull requests (local runner): prepare → review → approve & publish ── */
+function diffHtml(txt) {
+  return `<div class="diff">${String(txt).split("\n").map(l => {
+    const c = l.startsWith("diff --git") ? "f" : l.startsWith("@@") ? "h" : (l.startsWith("+") && !l.startsWith("+++")) ? "a" : (l.startsWith("-") && !l.startsWith("---")) ? "r" : "";
+    return c ? `<span class="${c}">${esc(l)}</span>` : esc(l); }).join("\n")}</div>`;
+}
+function prSection(w) {
+  if (!DATA.local) return "";
+  const runs = (DATA.pr_runs || []).filter(r => r.wave === w.wave), r = runs[runs.length - 1];
+  const cli = c => `<code>${esc(c)}</code>`;
+  if (!r) return `<h3>🔀 Pull request</h3><div class="prbox"><p class="muted" style="margin:0 0 8px">No PR prepared for this wave yet. The PR agent applies the wave in a sandbox, re-runs its exit gates and prepares one patch per module — it has no write access; nothing is published until you approve.</p>
+    ${SERVED ? `<button class="btn primary" data-pr-start="${w.wave}">🔀 Prepare the PR for wave ${w.wave}</button>` : `Run ${cli(`mig pr ${w.wave}`)}`}</div>`;
+  const head = `<div class="muted" style="font-size:12px">${esc(r.run)} · ${esc(r.created_at || "")}</div>`;
+  if (["running", "queued"].includes(r.status)) return `<h3>🔀 Pull request</h3><div class="prbox">${head}<p>⏳ The PR agent is working — follow it in 🛰️ Live flow.</p></div>`;
+  if (r.status === "paused") return `<h3>🔀 Pull request</h3><div class="prbox">${head}<p>⏸ Paused on a Claude usage limit — ${cli(`mig resume ${r.run}`)} once it resets.</p></div>`;
+  if (r.status !== "idle" || !r.pr) return `<h3>🔀 Pull request</h3><div class="prbox">${head}<p>⚠️ ${esc(r.grader_text || "The run did not produce pr.json.")}</p>${SERVED ? `<button class="btn" data-pr-start="${w.wave}">Retry</button>` : cli(`mig pr ${w.wave}`)}</div>`;
+  const pr = r.pr, rv = r.review || {}, ready = pr.status === "READY";
+  const gates = (pr.gates || []).map(g => `<tr><td><b>${esc(g.id)}</b> ${esc(g.check)}</td><td><code>${esc(g.command)}</code></td><td class="${g.result === "PASS" ? "chip-pass" : g.result === "FAIL" ? "chip-fail" : "chip-skip"}">${esc(g.result)}</td></tr>`).join("");
+  const mods = (pr.modules || []).map(m => `<details ${pr.modules.length === 1 ? "open" : ""}><summary><b>${esc(m.module)}</b> · ${m.files.length} file(s) · ${r.publishable[m.module] ? "→ PR/MR" : `<span class="muted">patch only — ${esc(r.problems[m.module] || "")}</span>`}</summary>
+      <div class="muted" style="font-size:12px;margin-top:4px">commit: ${esc(m.commit_message.split("\n")[0])}</div>${diffHtml(r.patches[m.module] || "(patch missing)")}</details>`).join("");
+  let decision = "";
+  if (rv.state === "approved") decision = `<div class="reco">✅ Approved by ${esc(rv.by)} · ${esc(rv.at)}<ul>${(rv.published || []).map(x => x.url ? `<li>${esc(x.module)}: <a href="${esc(x.url)}" target="_blank" rel="noopener">#${esc(x.number)} ↗</a> (open, not merged)</li>` : `<li>${esc(x.module)}: patch only — <code>${esc(x.patch_only)}</code></li>`).join("")}</ul></div>`;
+  else if (rv.state === "denied") decision = `<div class="reco">✋ Denied by ${esc(rv.by)} · ${esc(rv.at)}${rv.reason ? ` — ${esc(rv.reason)}` : ""}. Nothing was published.</div>`;
+  else if (!ready) decision = `<div class="reco">⛔ The PR agent marked this wave <b>BLOCKED</b>: ${esc(pr.blocked_reason || "")}</div>`;
+  else decision = `${rv.state === "failed" ? `<div class="reco">⚠️ Publishing failed: ${esc(rv.error || "")}. Fix it (token, base_branch…) and approve again — already published repos are skipped.</div>` : ""}
+    <h3>✋ Your decision</h3><p class="muted" style="font-size:12.5px;margin:0">Approving pushes branch <code>${esc(pr.branch)}</code> and opens one PR/MR per repository with your local token. Nothing is merged.</p>
+    ${SERVED ? `<textarea id="prReason" placeholder="Reason (required to deny)"></textarea><div style="display:flex;gap:8px"><button class="btn primary" data-pr-approve="${esc(r.run)}">✅ Approve & publish</button><button class="btn" data-pr-deny="${esc(r.run)}">✋ Deny</button></div>`
+             : `<p>${cli(`mig approve ${r.run}`)} or ${cli(`mig deny ${r.run} --reason "…"`)}</p>`}`;
+  return `<h3>🔀 Pull request</h3><div class="prbox">${head}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin:6px 0"><span class="badge"><i style="background:${ready ? "var(--st-good)" : "var(--st-critical)"}"></i>${esc(pr.status)}</span><span class="badge"><i style="background:${r.grader === "satisfied" ? "var(--st-good)" : "var(--st-warning)"}"></i>grader ${esc(r.grader || "—")}</span><span class="badge"><i style="background:var(--muted)"></i>${esc(pr.branch)}</span></div>
+    <b>${esc(pr.title)}</b>
+    ${gates ? `<h3>Gates re-run by the PR agent</h3><div class="scroll"><table><thead><tr><th>Gate</th><th>Command</th><th>Result</th></tr></thead><tbody>${gates}</tbody></table></div>` : ""}
+    ${(pr.to_run_at_rollout || []).length ? `<p class="muted" style="font-size:12.5px">Left for rollout: ${esc(pr.to_run_at_rollout.join(" · "))}</p>` : ""}
+    <h3>Changes</h3>${mods}
+    <details><summary>PR description</summary><div class="summary-md">${r.description_html}</div></details>
+    ${decision}</div>`;
+}
+function bindPrActions() {
+  $$("#dbody [data-pr-start]").forEach(b => b.onclick = async () => {
+    b.disabled = true; toast("⏳ Preparing the PR…", 0);
+    const r = await (await api(`api/pr/start?wave=${b.dataset.prStart}`, { method: "POST" })).json();
+    toast(r.ok ? `🔀 PR agent started (${esc(r.run)}) — follow it in Live flow` : `⚠️ ${esc(r.error)}`); if (r.ok) setTimeout(() => location.reload(), 1500);
+  });
+  const decide = async (run, verb) => {
+    const reason = ($("#prReason") || {}).value || "";
+    if (verb === "deny" && !reason.trim()) { toast("✍️ Give a reason to deny"); return; }
+    if (verb === "approve" && !confirm("Push the branch and open the pull/merge request(s) with your local token?")) return;
+    toast(verb === "approve" ? "⏳ Publishing…" : "⏳ Recording…", 0);
+    const r = await (await api(`api/pr/${encodeURIComponent(run)}/${verb}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ reason }) })).json();
+    toast(r.ok ? (verb === "approve" ? "✅ Published" : "✋ Denied — nothing published") : `⚠️ ${esc(r.error)}`, 4000); setTimeout(() => location.reload(), 1600);
+  };
+  $$("#dbody [data-pr-approve]").forEach(b => b.onclick = () => decide(b.dataset.prApprove, "approve"));
+  $$("#dbody [data-pr-deny]").forEach(b => b.onclick = () => decide(b.dataset.prDeny, "deny"));
 }
 
 /* ════════════════════════ export / import ════════════════════════════════ */

@@ -8,6 +8,7 @@ Tokens are only used locally (upload) or handed to the API as the repository res
 authorization token (mount). They never appear in prompts, logs or .mig/.
 """
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -50,17 +51,42 @@ def _redact(text, token):
     return text.replace(token, "***") if token else text
 
 
-def _git(args, cwd=None, token=None):
-    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+def _git(args, cwd=None, token=None, user=None):
+    """Run git. With a token, auth goes through GIT_ASKPASS reading an env var — never through argv or the URL."""
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    askpass = None
+    if token:
+        fd, askpass = tempfile.mkstemp(prefix="mig-askpass-", suffix=".sh")
+        with os.fdopen(fd, "w") as f:
+            f.write('#!/bin/sh\ncase "$1" in Username*) echo "$MIG_GIT_USER";; *) echo "$MIG_GIT_TOKEN";; esac\n')
+        os.chmod(askpass, 0o700)
+        env.update(GIT_ASKPASS=askpass, MIG_GIT_TOKEN=token, MIG_GIT_USER=user or "x-access-token")
+    try:
+        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, env=env)
+    finally:
+        if askpass:
+            os.unlink(askpass)
     if r.returncode:
         raise RuntimeError(_redact(f"git {' '.join(args)} failed: {r.stderr.strip()[:400]}", token))
     return r.stdout.strip()
 
 
+def git_user(m):
+    return "oauth2" if m.provider == "gitlab" else "x-access-token"
+
+
 def _authed_url(m, token):
+    """Only used by `mig doctor` for ls-remote reachability; clones and pushes use askpass."""
     u = urlparse(m["repo"])
-    user = "oauth2" if m.provider == "gitlab" else "x-access-token"
-    return urlunparse(u._replace(netloc=f"{user}:{token}@{u.hostname}" + (f":{u.port}" if u.port else "")))
+    return urlunparse(u._replace(netloc=f"{git_user(m)}:{token}@{u.hostname}" + (f":{u.port}" if u.port else "")))
+
+
+def base_branch(m):
+    if m.get("base_branch"):
+        return m["base_branch"]
+    if SHA_RE.match(m.ref) or re.match(r"^v?\d+(\.\d+)*", m.ref):
+        return None   # a commit or a version tag: we cannot guess the branch to target
+    return m.ref
 
 
 def _tar(src_dir, name, out):
@@ -73,16 +99,23 @@ def _tar(src_dir, name, out):
 
 def _clone(m, dst):
     """Clone a repo module at its ref into dst (token used for the clone only, then removed from the remote)."""
-    token = m.token()
-    url = _authed_url(m, token) if token else m["repo"]
+    token, user = m.token(), git_user(m)
     if SHA_RE.match(m.ref):
-        _git(["clone", "--quiet", url, str(dst)], token=token)
-        _git(["checkout", "--quiet", m.ref], cwd=dst, token=token)
+        _git(["clone", "--quiet", m["repo"], str(dst)], token=token, user=user)
+        _git(["checkout", "--quiet", m.ref], cwd=dst)
     else:
-        _git(["clone", "--quiet", "--depth", "1", "--branch", m.ref, url, str(dst)], token=token)
-    if token:
-        _git(["remote", "set-url", "origin", m["repo"]], cwd=dst)
+        _git(["clone", "--quiet", "--depth", "1", "--branch", m.ref, m["repo"], str(dst)], token=token, user=user)
     return _git(["rev-parse", "HEAD"], cwd=dst)
+
+
+def _git_baseline(dst):
+    """Give a copied (non-git) module a baseline commit so agents can produce `git diff` patches."""
+    if (dst / ".git").exists():
+        return
+    _git(["init", "--quiet"], cwd=dst)
+    _git(["add", "-A"], cwd=dst)
+    _git(["-c", "user.name=migration-control", "-c", "user.email=migration-control@localhost", "commit", "--quiet",
+          "--no-gpg-sign", "-m", "production baseline"], cwd=dst)
 
 
 def _extract_single_root(archive, tmp):
@@ -102,6 +135,7 @@ def materialize(cfg, m, workspace_dir):
                 shutil.copytree(_extract_single_root(src, tmp), dst, ignore=shutil.ignore_patterns(*SKIP_DIRS))
         else:
             shutil.copytree(src, dst, ignore=shutil.ignore_patterns(*SKIP_DIRS))
+        _git_baseline(dst)
         return f"copied from {m['path']}"
     return f"cloned at {_clone(m, dst)[:12]}"
 

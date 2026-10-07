@@ -36,9 +36,12 @@ Runners: `local` (Claude Code headless, Docker or host — default) and `managed
   (`resources` + `schedule` on update), and a first `mig scan` / `mig plan` end to end.
 
 ## v1 — close the loop
-- **`mig pr <wave>`**: the agent produces the patch + description from the plan; the dashboard shows the diff with ✋ Approve / Deny;
-  `mig` then pushes the branch and opens the PR (GitHub) or MR (GitLab) with the local token — the token never enters the sandbox.
-  Optional mode: the agent opens the PR itself through the GitHub MCP server, every write `always_ask`.
+- ✅ **`mig pr <wave>`** (local runner): PR agent prepares patches + `pr.json` + description, re-runs exit gates, graded; review in the
+  wave drawer (diff, gates, description) → ✅ Approve & publish / ✋ Deny, or `mig approve|deny`; `mig` pushes `migration/wave-<n>-…`
+  and opens a GitHub PR / GitLab MR per repo with the local token (askpass, never in argv); partial publishes resume; never merges.
+  Dashboard POSTs need a per-start secret + same origin. Verified with a fake agent, a local bare repo and a fake GitHub API
+  (tests/test_pr.py + a browser walk-through). Not yet against real GitHub / GitLab.
+- Still open: `mig pr` on the managed runner; optional mode where the agent opens the PR itself via the GitHub MCP server.
 - **Claude Code skill `/migrate`**: interview → writes `migration.yaml` → `mig doctor && mig up && mig scan`.
 - **`mig eval`**: replay golden cases against a new agent version before promoting it to the deployment.
 - Demo mode for any project (today it only plays the bundled petclinic recording).

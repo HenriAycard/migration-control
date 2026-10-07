@@ -1,5 +1,6 @@
 """mig — whole-estate version, CVE and upgrade migrations on Claude Managed Agents."""
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -8,7 +9,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from . import RESOURCES, __version__, config, dashboard, local, provision, render, runs
+from . import RESOURCES, __version__, config, dashboard, local, provision, publish, render, runs
 from .api import ApiError, Client, load_dotenv
 from .state import State
 
@@ -146,14 +147,9 @@ def cmd_doctor(a):
         def reach(m=m):
             if "path" in m:
                 return "local path" + ("" if cfg.local else ", snapshot uploaded by `mig up`")
-            from .estate import _authed_url, _redact
-            url = _authed_url(m, m.token()) if m.get("token_env") else m["repo"]
-            r = subprocess.run(["git", "ls-remote", "--exit-code", url, m.ref], capture_output=True, text=True, timeout=60,
-                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
-            if r.returncode == 2 and len(m.ref) == 40:
-                pass  # a commit SHA is not a ref name; reachability was still proven
-            elif r.returncode:
-                raise RuntimeError(_redact(r.stderr.strip()[:200] or f"ref {m.ref} not found", m.token() if m.get("token_env") else None))
+            from .estate import SHA_RE, _git, git_user
+            _git(["ls-remote", m["repo"], "HEAD"] if SHA_RE.match(m.ref) else ["ls-remote", "--exit-code", m["repo"], m.ref],
+                 token=m.token(), user=git_user(m))
             return {"local": "checked out locally for each run", "clone": "public, cloned by the agent", "mount": "private GitHub, mounted per run",
                     "upload": "private, snapshot uploaded by `mig up`"}[m.fetch]
         check(f"module {m.name}", reach)
@@ -215,12 +211,13 @@ def cmd_plan(a):
         _say("✓ plan cached — `mig dashboard` to open it")
 
 
-def _local_start(cfg, st, kind, scan, a):
+def _local_start(cfg, st, kind, scan, a, **pr):
     if cfg["runner"]["isolation"] == "docker" and not st.get("local", "image"):
         sys.exit("no image yet — run `mig up` first")
     local.auth_status(cfg)
-    _say(f"▶ preparing {kind[:-1]} (local · {cfg['runner']['isolation']})" + (f" from scan {scan}" if scan else ""))
-    rid = local.prepare(cfg, st, kind, scan, log=_say)
+    src = f" from scan {scan}" if scan else (f" for wave {pr['wave']} of plan {pr['plan_run']}" if pr else "")
+    _say(f"▶ preparing {kind[:-1]} (local · {cfg['runner']['isolation']}){src}")
+    rid = local.prepare(cfg, st, kind, scan, log=_say, **pr)
     if a.wait or getattr(a, "foreground", False):
         _say(f"▶ {rid} running in the foreground…")
         verdict = local.start(cfg, st, kind, rid, foreground=True)
@@ -228,9 +225,53 @@ def _local_start(cfg, st, kind, scan, a):
             _say(f"⏸ {rid} paused on a Claude usage limit — `mig resume {rid}` once it resets")
         else:
             _say(f"✓ {rid} finished · grader {verdict} — `mig dashboard` to open it")
+            if kind == "prs":
+                _say(f"  review it, then `mig approve {rid}` (publishes the PR/MR) or `mig deny {rid}`")
     else:
         pid = local.start(cfg, st, kind, rid)
         _say(f"▶ {rid} started in the background (pid {pid})\n  follow it live: `mig dashboard --serve` · status: `mig status` · stop: `mig stop {rid}`")
+
+
+def _latest_plan(st, plan=None):
+    if plan:
+        return plan
+    plans = [m for m in local.list_runs(st, "plans") if (st.cache / "plans" / m["id"] / "migration-plan.json").exists()]
+    if not plans:
+        sys.exit("no finished plan yet — run `mig plan` first")
+    return plans[-1]["id"]
+
+
+def cmd_pr(a):
+    cfg, st, _ = _ctx(need_client=False)
+    if not cfg.local:
+        sys.exit("`mig pr` runs on the local runner for now (runner: {type: local})")
+    plan = _latest_plan(st, a.plan)
+    pr_mods = json.loads((st.cache / "plans" / plan / "migration-plan.json").read_text())
+    w = next((x for x in pr_mods["waves"] if x["wave"] == a.wave), None)
+    if w:
+        for name in w.get("modules") or []:
+            try:
+                m = cfg.module(name)
+            except KeyError:
+                continue
+            why = ("local path — you will get a patch to apply yourself" if "repo" not in m
+                   else "no token_env — patch only" if not m.get("token_env")
+                   else "ref is not a branch — set base_branch to publish" if not publish.base_branch(m) else "")
+            if why:
+                _say(f"  note: {name}: {why}")
+    return _local_start(cfg, st, "prs", None, a, plan_run=plan, wave=a.wave)
+
+
+def cmd_approve(a):
+    cfg, st, _ = _ctx(need_client=False)
+    _say(f"▶ publishing {a.run} (one branch + PR/MR per repository, nothing is merged)")
+    review = publish.decide(cfg, st, a.run, True, log=_say)
+    _say(f"✓ {a.run} approved by {review['by']}")
+
+
+def cmd_deny(a):
+    cfg, st, _ = _ctx(need_client=False)
+    publish.decide(cfg, st, a.run, False, a.reason or "", log=_say)
 
 
 def cmd_worker(a):
@@ -267,10 +308,11 @@ def cmd_status(a):
         _say(f"project {cfg['project']} · runner local ({cfg['runner']['isolation']}) · model {local.model_of(cfg)}")
         if cfg.get("schedule"):
             _say(f"  schedule {cfg['schedule']['cron']} · " + ("installed in crontab" if local.schedule_installed(cfg) else "not installed (`mig schedule install`)"))
-        for kind in ("scans", "plans"):
+        for kind in ("scans", "plans", "prs"):
             for m in local.list_runs(st, kind)[-5:]:
                 cost = f" · ${m['list_cost_cents'] / 100:.2f}" if m.get("list_cost_cents") is not None else ""
-                _say(f"  {kind[:-1]:<4} {m['id']} · {m['status']} · {round((m.get('active_seconds') or 0) / 60, 1)} min{cost} · grader {m.get('verdicts') or '—'}")
+                review = f" · review {m['review']['state']}" if m.get("review") else ""
+                _say(f"  {kind[:-1]:<4} {m['id']} · {m['status']} · {round((m.get('active_seconds') or 0) / 60, 1)} min{cost} · grader {m.get('verdicts') or '—'}{review}")
         return
     _say(f"project {cfg['project']} · model {st.get('model') or '—'}")
     for role in ("scanner", "planner"):
@@ -372,8 +414,21 @@ def main(argv=None):
     s = sub.add_parser("stop", help="local runner: stop a running scan or plan")
     s.add_argument("run")
     s.set_defaults(fn=cmd_stop)
+    s = sub.add_parser("pr", help="prepare the pull/merge request(s) for one wave of the latest plan")
+    s.add_argument("wave", type=int)
+    s.add_argument("--plan", help="plan run id (default: latest plan)")
+    s.add_argument("--wait", action="store_true")
+    s.add_argument("--foreground", action="store_true")
+    s.set_defaults(fn=cmd_pr)
+    s = sub.add_parser("approve", help="approve a prepared PR run: push the branch and open the PR/MR (never merges)")
+    s.add_argument("run")
+    s.set_defaults(fn=cmd_approve)
+    s = sub.add_parser("deny", help="deny a prepared PR run: nothing is published")
+    s.add_argument("run")
+    s.add_argument("--reason", default="")
+    s.set_defaults(fn=cmd_deny)
     s = sub.add_parser("_worker")  # internal: detached local run
-    s.add_argument("kind", choices=["scans", "plans"])
+    s.add_argument("kind", choices=["scans", "plans", "prs"])
     s.add_argument("run")
     s.set_defaults(fn=cmd_worker)
     sub.add_parser("run-now", help="fire the scheduled deployment once, now").set_defaults(fn=cmd_run_now)

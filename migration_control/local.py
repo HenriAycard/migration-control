@@ -30,6 +30,8 @@ from . import RESOURCES, render
 from .estate import materialize
 from .runs import PLAN_FILES, SCAN_FILES, phase_of, tool_label
 
+PR_FILES = ("pr.json", "pr-description.md")
+
 AUTH_VARS = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")
 DEFAULT_IMAGE = "node:22-bookworm"
 SANDBOX_PATHS = {  # container path → run-dir subfolder (longest first for rewriting)
@@ -132,7 +134,10 @@ def auth_status(cfg):
         return f"{have[0]} set"
     if not shutil.which("claude"):
         raise RuntimeError("claude (Claude Code) is not on PATH — https://docs.claude.com/en/docs/claude-code")
-    r = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=30)
+    try:
+        r = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("`claude auth status` did not answer within 30 s — check that Claude Code runs (`claude --version`)")
     try:
         d = json.loads(r.stdout)
     except ValueError:
@@ -168,7 +173,7 @@ def _kind_dir(st, kind):
     return st.cache / kind
 
 
-def prepare(cfg, st, kind, scan_session=None, log=print):
+def prepare(cfg, st, kind, scan_session=None, log=print, plan_run=None, wave=None):
     """Create the run dir, check out every module, write meta.json (status queued). Returns run id."""
     rid = new_run_id()
     work = st.dir / "work" / rid
@@ -186,13 +191,27 @@ def prepare(cfg, st, kind, scan_session=None, log=print):
         if not src.exists():
             raise RuntimeError(f"scan {scan_session} has no impact-report.json")
         shutil.copy(src, work / "uploads" / "impact-report.json")
+    if kind == "prs":
+        plan_dir = _kind_dir(st, "plans") / plan_run
+        if not (plan_dir / "migration-plan.json").exists():
+            raise RuntimeError(f"plan {plan_run} has no migration-plan.json")
+        waves = [w["wave"] for w in json.loads((plan_dir / "migration-plan.json").read_text()).get("waves", [])]
+        if wave not in waves:
+            raise RuntimeError(f"plan {plan_run} has no wave {wave} (waves: {waves})")
+        shutil.copy(plan_dir / "migration-plan.json", work / "uploads" / "migration-plan.json")
+        if (plan_dir / f"wave-{wave}.patch").exists():
+            shutil.copy(plan_dir / f"wave-{wave}.patch", work / "uploads" / "wave.patch")
+        if (plan_dir / "outputs" / "evidence").exists():
+            shutil.copytree(plan_dir / "outputs" / "evidence", work / "uploads" / "plan-evidence")
     d = _kind_dir(st, kind) / rid
     d.mkdir(parents=True, exist_ok=True)
-    meta = {"id": rid, "title": f"{kind[:-1]} (local)", "created_at": now_iso(), "status": "queued", "runner": "local",
+    title = f"PR · wave {wave} (local)" if kind == "prs" else f"{kind[:-1]} (local)"
+    meta = {"id": rid, "title": title, "created_at": now_iso(), "status": "queued", "runner": "local",
             "trigger": os.environ.get("MIG_TRIGGER", "manual"), "scan_session": scan_session, "agent_version": None,
+            "plan_run": plan_run, "wave": wave, "review": {"state": "pending"} if kind == "prs" else None,
             "verdicts": [], "explanation": "", "active_seconds": 0, "list_cost_cents": None, "console": ""}
     (d / "meta.json").write_text(json.dumps(meta, indent=2))
-    st.set("last", "scan" if kind == "scans" else "plan", value=rid)
+    st.set("last", {"scans": "scan", "plans": "plan", "prs": "pr"}[kind], value=rid)
     return rid
 
 
@@ -382,9 +401,13 @@ def work(cfg, st, kind, rid):
     loc = (lambda s: _localize(s, host)) if cfg["runner"]["isolation"] == "none" else (lambda s: s)
     if kind == "scans":
         system, task, rubric = (render.scanner_agent(cfg, "-", "-")["system"], render.scanner_task(cfg), render.scanner_rubric(cfg))
-    else:
+    elif kind == "plans":
         system, task, rubric = (render.planner_agent(cfg, "-", "-")["system"], render.planner_task(cfg, meta["scan_session"]),
                                 render.planner_rubric(cfg))
+    else:
+        system, task, rubric = (render.pr_system(cfg),
+                                render.pr_task(cfg, meta["plan_run"], meta["wave"], (work_dir / "uploads" / "wave.patch").exists()),
+                                render.pr_rubric(cfg))
     resuming = bool(meta.get("progress"))
     if resuming and not (work_dir / "workspace").exists():
         raise RuntimeError(f"{rid} cannot be resumed: its workspace is gone — start a new run")
@@ -474,7 +497,7 @@ def _cleanup(work_dir):
 
 
 def resume(cfg, st, rid, foreground=False):
-    for kind in ("scans", "plans"):
+    for kind in ("scans", "plans", "prs"):
         mp = _kind_dir(st, kind) / rid / "meta.json"
         if mp.exists():
             m = json.loads(mp.read_text())
@@ -487,9 +510,9 @@ def resume(cfg, st, rid, foreground=False):
 def _collect(kind, work_dir, d):
     out = work_dir / "outputs"
     shutil.copytree(out, d / "outputs", dirs_exist_ok=True)
-    wanted = SCAN_FILES if kind == "scans" else PLAN_FILES
+    wanted = {"scans": SCAN_FILES, "plans": PLAN_FILES, "prs": PR_FILES}[kind]
     for f in out.iterdir():
-        if f.is_file() and (f.name in wanted or (kind == "plans" and f.name.startswith("wave-") and f.name.endswith(".patch"))):
+        if f.is_file() and (f.name in wanted or (kind in ("plans", "prs") and f.name.endswith(".patch"))):
             shutil.copy(f, d / f.name)
 
 
@@ -516,7 +539,7 @@ def list_runs(st, kind):
 
 def running_runs(st):
     out = []
-    for kind, role in (("scans", "scanner"), ("plans", "planner")):
+    for kind, role in (("scans", "scanner"), ("plans", "planner"), ("prs", "pr")):
         for m in list_runs(st, kind):
             if m.get("status") not in ("running", "queued"):
                 continue
@@ -528,7 +551,7 @@ def running_runs(st):
 
 
 def stop_run(st, rid):
-    for kind in ("scans", "plans"):
+    for kind in ("scans", "plans", "prs"):
         p = _kind_dir(st, kind) / rid / "meta.json"
         if p.exists():
             m = json.loads(p.read_text())

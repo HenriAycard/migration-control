@@ -77,7 +77,7 @@
           "token_env": {
             "type": "string",
             "pattern": "^[A-Z_][A-Z0-9_]*$",
-            "description": "Name of the environment variable holding a read token. Omit for public repositories."
+            "description": "Name of the environment variable holding a token. Read access is enough to scan; publishing a PR/MR needs write access (GitHub: Contents + Pull requests; GitLab: api / write_repository)."
           },
           "path": {
             "type": "string",
@@ -93,6 +93,10 @@
           "icon": {
             "type": "string",
             "maxLength": 4
+          },
+          "base_branch": {
+            "type": "string",
+            "description": "Branch pull/merge requests target (default: ref when it is a branch name). Required to publish when ref is a tag or a commit."
           }
         }
       }

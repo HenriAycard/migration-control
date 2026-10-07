@@ -10,7 +10,7 @@ migration waves and proves the first one. An independent grader checks every run
 **Migration Control**, a local dashboard, shows all of it — live.
 
 ```
-🗓️ schedule ─▶ 🔭 scanner ─▶ 🎯 grader ─▶ ✋ triage ─▶ 🗺️ planner ─▶ ✋ decisions ─▶ (v1: 🔀 PR / MR)
+🗓️ schedule ─▶ 🔭 scanner ─▶ 🎯 grader ─▶ ✋ triage ─▶ 🗺️ planner ─▶ ✋ decisions ─▶ 🔀 PR agent ─▶ ✋ approve ─▶ PR / MR
                     │ 🧠 memory: "new since last scan"
 ```
 
@@ -48,7 +48,21 @@ mig up                               # local: builds the sandbox image · manage
 mig scan                             # start a scan now
 mig dashboard --serve                # http://127.0.0.1:8765 — follow it live
 mig plan                             # once the scan is graded: build the migration plan
+mig pr 4                             # prepare the PR/MR for wave 4 — then approve it in the dashboard (or `mig approve <run>`)
 ```
+
+## From a wave to a pull request
+
+`mig pr <wave>` (local runner) starts the **PR agent**: it applies the wave on fresh checkouts in the sandbox, re-runs the
+wave's exit gates, and prepares one patch per module, `pr.json` and an approver-ready description — graded like every
+other run. **It has no write credential.** You review the diff, gates and description in the wave's drawer
+(`mig dashboard --serve`) and click *Approve & publish*, or run `mig approve <run>` / `mig deny <run> --reason …`.
+Only then does `mig`, on your machine, push branch `migration/wave-<n>-…` and open one pull request (GitHub) or merge
+request (GitLab) per repository with your token. Nothing is ever merged.
+
+To publish, a module needs `token_env` with **write** access (GitHub fine-grained: Contents + Pull requests read/write;
+GitLab: `api` or `write_repository`) and a branch to target (`ref` if it is a branch, otherwise `base_branch`).
+Local-path modules get a patch to apply yourself.
 
 `mig up` is idempotent: change `migration.yaml` and run it again. With the managed runner, agents get a new
 version and the deployment gets the new kickoff. Everything created is recorded in `.mig/state.json`.
@@ -120,6 +134,7 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 | `mig doctor` | key, API, tokens, repository access |
 | `mig up` | create / update everything in your Anthropic workspace |
 | `mig scan [--wait]` · `mig plan [--scan ID] [--wait]` | start runs |
+| `mig pr <wave>` · `mig approve <run>` · `mig deny <run>` | prepare a wave's PR/MR · publish it · reject it |
 | `mig stop <run>` · `mig resume <run>` | stop a local run · resume one paused by a Claude usage limit |
 | `mig schedule install\|remove` (local) · `mig run-now` · `mig schedule pause\|unpause` (managed) | scheduling |
 | `mig status` · `mig outputs [ID]` | last runs, grader verdicts, cost · download outputs |
@@ -127,7 +142,8 @@ the proven wave's `.patch` and its evidence logs. `mig outputs <session>` downlo
 
 ## Safety model
 
-- Agents **report and plan only** — they never push, open PRs or touch your repositories (PR/MR creation is v1 and will be human-approved per write).
+- Agents never push or open PRs: none of them gets a write credential. PRs/MRs are opened by `mig` on your machine, only after you approve the prepared diff, and never merged.
+- The dashboard server only accepts actions carrying a per-start secret embedded in the page it serves (and same-origin requests), so other websites cannot trigger approvals on `127.0.0.1`.
 - Every version, CVE and end-of-life claim needs an official source or is tagged `UNVERIFIED` (the bundled `regulated-sourcing` skill).
 - Your API key and tokens are never written by `mig` — not to `.mig/`, not into prompts, not into the dashboard page, not on a `docker run` command line. The dashboard server listens on `127.0.0.1` only.
 - Local runs use `bypassPermissions`: keep `isolation: docker` unless you accept the agent running builds and shell commands directly on your machine.
