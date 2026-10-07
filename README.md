@@ -182,6 +182,10 @@ rules: official sources only (vendor advisories, registries, NVD, OSV, GitHub ad
 
 A single local page — `mig dashboard` (static) or `mig dashboard --serve` (live feed + approvals on `127.0.0.1`).
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="Replaying a scan, inspecting an alert, opening the proven wave and signing a decision" width="100%">
+</p>
+
 <table>
 <tr>
 <td width="50%"><img src="docs/assets/estate.png" alt="Estate view"></td>
